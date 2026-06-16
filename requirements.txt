@@ -1,0 +1,6 @@
+# RevOps Signal dashboard — Streamlit Community Cloud
+streamlit>=1.36
+pandas>=2.0
+snowflake-snowpark-python>=1.18
+snowflake-connector-python>=3.10
+cryptography>=42.0

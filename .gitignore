@@ -1,0 +1,11 @@
+# Secrets — never commit
+.streamlit/secrets.toml
+*.p8
+*.pem
+*.key
+rsa_key*
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
