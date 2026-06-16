@@ -68,14 +68,15 @@ table.rv-table td.goal {{ color:{T['text3']}; font-size:11px; }}
 .rv-badge {{ font-size:10px; padding:1px 6px; border-radius:3px; font-family:'IBM Plex Mono',monospace; }}
 .rv-real {{ background:{T['g_bg']}; color:{T['g_fg']}; }}
 .rv-proxy {{ background:{T['y_bg']}; color:{T['y_fg']}; }}
-/* ── density: cut vertical whitespace so more fits without scrolling ── */
-.block-container {{ padding-top:1.1rem; padding-bottom:1rem; max-width:1500px; }}
-[data-testid="stVerticalBlock"] {{ gap:0.5rem; }}
-[data-testid="stHorizontalBlock"] {{ gap:0.8rem; }}
+/* ── density: tighter than default, but with safe clearance (no overlaps) ── */
+.block-container {{ padding-top:1.2rem; padding-bottom:1.2rem; max-width:1500px; }}
+[data-testid="stVerticalBlock"] {{ gap:0.8rem; }}
+[data-testid="stHorizontalBlock"] {{ gap:1rem; }}
 [data-testid="stDataFrame"] {{ font-size:12px; }}
-[data-testid="stCaptionContainer"] {{ margin-top:-3px; font-size:11px; line-height:1.35; }}
-.rv-band {{ margin-top:9px; }}
-.rv-tiles {{ margin:4px 0 2px; }}
+[data-testid="stCaptionContainer"] {{ margin-top:4px; font-size:11px; line-height:1.45; }}
+.rv-band {{ margin-top:16px; margin-bottom:6px; }}
+.rv-tiles {{ margin:6px 0 12px; overflow:hidden; }}
+.rv-tile {{ overflow:hidden; }}
 /* compact help expander */
 details[data-testid="stExpander"] {{ border:1px dashed {T['border']}; border-radius:6px;
     margin:2px 0 4px; background:#fbfcfe; }}
