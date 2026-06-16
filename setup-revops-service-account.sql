@@ -25,6 +25,12 @@ GRANT SELECT ON FUTURE VIEWS IN SCHEMA GOLD_V3_DB.SALES TO ROLE REVOPS_DASHBOARD
 --  GRANT SELECT ON VIEW GOLD_V3_DB.SALES.REVOPS_xxx TO ROLE REVOPS_DASHBOARD_RO;
 --  per view, so the role can read ONLY the dashboard's views.)
 
+-- IMPORTANT: the dashboard also queries one TABLE directly (the US-state map
+-- geometry). Granting views alone is NOT enough — the table needs its own grant,
+-- otherwise the app crashes on the choropleth query with "object does not exist
+-- or not authorized".
+GRANT SELECT ON TABLE GOLD_V3_DB.SALES.REVOPS_US_STATE_PATHS TO ROLE REVOPS_DASHBOARD_RO;
+
 -- 4. Service-account user — no password, key-pair auth only
 CREATE USER IF NOT EXISTS REVOPS_DASHBOARD_SVC
   DEFAULT_ROLE = REVOPS_DASHBOARD_RO
