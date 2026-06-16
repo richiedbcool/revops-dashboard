@@ -11,6 +11,7 @@ Two top-level tabs (2026-06-10):
   📊 RevOps Signal   — internal operations (sell-in, at-risk, fulfillment, AR…)
   🌐 Market Analysis — Nielsen + SPINS competitive intel (nested sub-tabs)
 """
+import html as _html
 import streamlit as st
 import pandas as pd
 import streamlit.components.v1 as _components
@@ -85,6 +86,21 @@ details[data-testid="stExpander"] summary:hover {{ color:{T['hdr_bg']}; }}
     font-family:'IBM Plex Mono',monospace; text-transform:uppercase; letter-spacing:.04em; }}
 .rv-help p, .rv-help li {{ font-size:12.5px; line-height:1.5; color:{T['text']}; margin:2px 0; }}
 .rv-help b {{ color:{T['text']}; }}
+/* ── card-style data table (Market Analysis) ── */
+.rv-card-wrap {{ margin:6px 0 8px; border:1px solid #e6e9ef; border-radius:8px;
+    overflow:auto; box-shadow:0 2px 10px rgba(0,0,0,0.07); }}
+table.rv-card {{ width:100%; border-collapse:collapse; background:#fff; font-size:13px; }}
+table.rv-card th {{ background:{T['hdr_bg']}; color:#fff; font-weight:600; text-align:right;
+    padding:10px 14px; white-space:nowrap; position:sticky; top:0; z-index:1;
+    font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.03em; text-transform:uppercase; }}
+table.rv-card th:first-child {{ text-align:left; }}
+table.rv-card td {{ padding:9px 14px; text-align:right; border-bottom:1px solid #eceef2;
+    font-family:'IBM Plex Mono',monospace; color:{T['text']}; white-space:nowrap; }}
+table.rv-card td:first-child {{ text-align:left; font-weight:600; background:#f8fafc;
+    font-family:'IBM Plex Sans',sans-serif; }}
+table.rv-card tbody tr:hover td {{ background:#eef4fb; }}
+table.rv-card tbody tr:last-child td {{ border-bottom:none; }}
+table.rv-card tr.rv-lead td {{ font-weight:700; color:#1e40af; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -167,6 +183,42 @@ def help_box(md, label="ℹ️  What am I looking at? (plain English)"):
     it adds no whitespace until a rep opens it."""
     with st.expander(label):
         st.markdown(f'<div class="rv-help">{md}</div>', unsafe_allow_html=True)
+
+def _fmt_cell(col, v, money_cols):
+    """Format one cell for the card table: $ for money cols, % for %-headed cols,
+    thousands separators otherwise. Already-formatted strings pass through."""
+    if v is None or (not isinstance(v, str) and pd.isna(v)):
+        return ""
+    if isinstance(v, str):
+        return _html.escape(v)
+    try:
+        fv = float(v)
+    except (TypeError, ValueError):
+        return _html.escape(str(v))
+    if col in money_cols:
+        s = f"${fv:,.2f}"
+        return s[:-3] if s.endswith(".00") else s          # drop trailing cents
+    if "%" in str(col):
+        return f"{fv:,.1f}%"
+    if fv == int(fv):
+        return f"{int(fv):,}"
+    return f"{fv:,.2f}".rstrip("0").rstrip(".")
+
+def show_table(df, money_cols=None, bold_top=False, scroll_h=None):
+    """Render a DataFrame as a clean card-style HTML table (Market Analysis look)."""
+    money_cols = set(money_cols or [])
+    cols = list(df.columns)
+    head = "".join(f"<th>{_html.escape(str(c))}</th>" for c in cols)
+    rows = []
+    for i, (_, r) in enumerate(df.iterrows()):
+        cls = ' class="rv-lead"' if (bold_top and i == 0) else ""
+        tds = "".join(f"<td>{_fmt_cell(c, r[c], money_cols)}</td>" for c in cols)
+        rows.append(f"<tr{cls}>{tds}</tr>")
+    style = f' style="max-height:{scroll_h}px"' if scroll_h else ""
+    st.markdown(
+        f'<div class="rv-card-wrap"{style}><table class="rv-card">'
+        f"<thead><tr>{head}</tr></thead><tbody>{''.join(rows)}</tbody></table></div>",
+        unsafe_allow_html=True)
 
 # ── Header + week picker ────────────────────────────────────────────────────
 st.markdown(
@@ -585,7 +637,7 @@ watch; 7TABZ alone is already bigger in SPINS conventional than MIT45's whole fa
                         WHERE channel='Convenience Stores' AND is_market_total
                           AND period_type='Latest 52 Weeks' AND is_latest_rolling
                         ORDER BY dollar_rank""")
-            st.dataframe(money(comp, ['$ (52wk)']), use_container_width=True, hide_index=True)
+            show_table(comp, money_cols=['$ (52wk)'], bold_top=True)
             st.caption("FSI = $ share ÷ distribution (ACV) share. >1 over-indexes (sells above shelf footprint), "
                        "<1 under-indexes. MIT45 FSI ≈ 0.70 → selling below its distribution — a velocity, not a "
                        "shelf-presence, problem.")
@@ -625,7 +677,7 @@ to <b>sell faster where we already are</b>, not just chase more doors.</p>""")
                     AND n.is_latest_rolling AND n.usw_real IS NOT NULL
                   GROUP BY 1, 2
                   ORDER BY AVG(n.usw_real) DESC LIMIT 15""")
-        st.dataframe(money(nv, ['$/TDP','$/Store/Wk']), use_container_width=True, hide_index=True)
+        show_table(nv, money_cols=['$/TDP','$/Store/Wk'])
         help_box("""
 <p><b>What this is:</b> our real shelf <b>speed</b> per MIT45 product, per state — how fast each item sells in the
 stores that carry it (not how much we shipped).</p>
@@ -659,7 +711,7 @@ Low USW = it's stocked but sitting — a velocity/merchandising problem to fix b
         if oos.empty:
             st.caption("No distribution erosion vs the trailing-quarter baseline this period. ✅")
         else:
-            st.dataframe(oos, use_container_width=True, hide_index=True)
+            show_table(oos)
         st.caption("Negative Δ = MIT45 losing shelf presence (stores carrying it) recently vs its 12-week "
                    "baseline — a void / out-of-stock / delist signal to chase per state. Proxy (Nielsen has no "
                    "weekly series here); pairs with the FSI read above.")
@@ -715,9 +767,9 @@ find out why we're losing shelf and win the space back before a competitor takes
         _map_legend = ''.join(_swatch(_GREENS[i], _mfmt((i/6)**2*_mx) + '+') for i in range(6))
         _choropleth(_vals, _mtips, _shade, _map_legend)
         with st.expander(f"State detail (table) — {_map_brand}"):
-            st.dataframe(money(msdf.rename(columns={'Share':'$ Share %','Sales':'$ Sales (52wk)',
-                         'Last4wk':'$ Last 4wk','PPU':'$/Unit','ACV':'%ACV'}), ['$ Sales (52wk)','$ Last 4wk','$/Unit']),
-                         use_container_width=True, hide_index=True)
+            show_table(msdf.rename(columns={'Share':'$ Share %','Sales':'$ Sales (52wk)',
+                       'Last4wk':'$ Last 4wk','PPU':'$/Unit','ACV':'%ACV'}),
+                       money_cols=['$ Sales (52wk)','$ Last 4wk','$/Unit'])
         st.caption(f"Coloring {_map_brand} by {_map_metric}. Hover any state for share · last-4wk $ · $/unit · %ACV. "
                    "Share = % of the tracked kratom-shot set in that state. Grey = no measured sales for this brand.")
         help_box("""
@@ -827,7 +879,7 @@ brightest whitespace states for new distribution.</p>""")
                          WHERE n.is_market_total AND n.period_type='Latest 52 Weeks' AND n.is_latest_rolling
                            AND n.brand_name='{_exb}'
                          GROUP BY 1 ORDER BY 2 DESC LIMIT 8""")
-        st.dataframe(money(_ce_prod, ['$ (52wk)']), use_container_width=True, hide_index=True)
+        show_table(_ce_prod, money_cols=['$ (52wk)'], bold_top=True)
 
         st.markdown(f"**Top states — {_ex_brand}**  ·  $/Store/Wk = what each carrying store sells weekly")
         _ce_state = q(f"""SELECT state "State", SUM(total_dollar_sales) "$ (52wk)",
@@ -837,7 +889,7 @@ brightest whitespace states for new distribution.</p>""")
                           WHERE NOT is_market_total AND state<>'' AND period_type='Latest 52 Weeks'
                             AND is_latest_rolling AND brand_name='{_exb}'
                           GROUP BY 1 ORDER BY 2 DESC LIMIT 10""")
-        st.dataframe(money(_ce_state, ['$ (52wk)']), use_container_width=True, hide_index=True)
+        show_table(_ce_state, money_cols=['$ (52wk)'], bold_top=True)
 
         st.markdown(f"**Head-to-head by state — {_ex_brand} vs {_vs_brand}**")
         _vsb = _vs_brand.replace("'", "''")
@@ -856,8 +908,7 @@ brightest whitespace states for new distribution.</p>""")
             _hhx["Velocity lead"] = _hhx.apply(
                 lambda r: _ex_brand if (r[_a] or 0) > (r[_b] or 0) else (_vs_brand if (r[_b] or 0) > 0 else "—"),
                 axis=1)
-            st.dataframe(money(_hhx, [f"{_ex_brand} $", f"{_vs_brand} $"]),
-                         use_container_width=True, hide_index=True)
+            show_table(_hhx, money_cols=[f"{_ex_brand} $", f"{_vs_brand} $"])
         st.caption("Nielsen is aggregated to state × channel — no individual store names. $/Store/Wk is the "
                    "per-store velocity proxy. Head-to-head sorted by combined retail $; 'Velocity lead' flags "
                    "who sells more per carrying store in each state.")
@@ -898,7 +949,7 @@ per store — that's your talking point.</p>""")
                                 ROUND(price_per_unit,2) "$/Unit", ROUND(pct_acv,1) "%ACV"
                          FROM GOLD_V3_DB.SALES.REVOPS_NIELSEN_CK_REGION
                          WHERE brand_name='{_crb}' ORDER BY dollar_share_pct DESC""")
-            st.dataframe(money(_ckr, ['$ (52wk)', '$/Unit']), use_container_width=True, hide_index=True)
+            show_table(_ckr, money_cols=['$ (52wk)', '$/Unit'], bold_top=True)
         with _ckcol2:
             band(f"{_ckreg_brand} Weekly Sell-Through", "Circle K Total · true week-over-week (52 wks)")
             _ckw = q(f"""SELECT week_ending_date, ROUND(dollars) wk_dollars
@@ -954,7 +1005,7 @@ sell-through dipped, and tie asks (more facings, a promo) to those specific gaps
                              ROUND(pct_incremental,1) "% Promo"
                       FROM GOLD_V3_DB.SALES.REVOPS_SPINS_ACCOUNT
                       WHERE account_name='{_spa}' ORDER BY dollar_rank""")
-        st.dataframe(money(_spdf, ['$ (52wk)', '$/Unit (wtd)']), use_container_width=True, hide_index=True)
+        show_table(_spdf, money_cols=['$ (52wk)', '$/Unit (wtd)'], bold_top=True)
 
         band(f"Weekly sell-through @ {_sp_acct.title()}", "true week-over-week (52 wks) · pick a brand")
         _sw1, _sw2 = st.columns([2, 3])
@@ -994,14 +1045,14 @@ target). Walk in knowing where we stand in <b>their</b> stores.</p>""")
                     FROM GOLD_V3_DB.SALES.REVOPS_SPINS_COMPETITIVE
                     WHERE geography_raw='TOTAL US - MULO + CONVENIENCE'
                     ORDER BY dollar_rank""")
-        st.dataframe(money(_spc, ['$ (52wk)', '$/Unit (wtd)']), use_container_width=True, hide_index=True)
+        show_table(_spc, money_cols=['$ (52wk)', '$/Unit (wtd)'], bold_top=True)
 
         band("⚠ 7-OH Emerging Segment Watch (SPINS)", "7TABZ · 7 OHMZ · 7ZEN · 7OHS — the new entrant Nielsen missed")
         _7oh = q("""SELECT brand_raw "7-OH Brand", ROUND(SUM(dollars)) "$ (52wk)",
                           ROUND(100*SUM(incr_dollars)/NULLIF(SUM(dollars),0),1) "% Incremental"
                    FROM GOLD_V3_DB.SALES.REVOPS_SPINS_7OH
                    WHERE geo_type='TOTAL' GROUP BY 1 ORDER BY 2 DESC""")
-        st.dataframe(money(_7oh, ['$ (52wk)']), use_container_width=True, hide_index=True)
+        show_table(_7oh, money_cols=['$ (52wk)'], bold_top=True)
         st.caption("The 7-hydroxymitragynine segment is now a top-3 force in SPINS conventional — 7TABZ alone "
                    "(~$151M) is larger than MIT45's entire family (~$32M). High % incremental = promo-fueled "
                    "growth. SPINS is a different panel from Nielsen; treat as a complementary channel lens.")
@@ -1018,7 +1069,7 @@ target). Walk in knowing where we stand in <b>their</b> stores.</p>""")
             _rpiv = _rpiv[['SPINS Region'] + _rord]
             if 'MIT45' in _rpiv.columns:
                 _rpiv = _rpiv.sort_values('MIT45', ascending=False)
-            st.dataframe(_rpiv, use_container_width=True, hide_index=True)
+            show_table(_rpiv)
         st.caption("MIT45 is heavily Northeast-skewed (~13% share there vs ~3% nationally) and near-absent in "
                    "California / West (BT 70%+). The 7-OH segment concentrates in the Southeast (~33%) and "
                    "Mid-South (~26%) — watch those regions. Regions are SPINS' MULO+Conv standard regions "
@@ -1041,7 +1092,7 @@ c-store numbers.</p>""")
                               ROUND(price_per_unit,2) "$/Unit", ROUND(price_per_eq_unit,2) "$/EQ Unit",
                               ROUND(pct_incremental,1) "% Promo"
                        FROM GOLD_V3_DB.SALES.REVOPS_NIELSEN_CK_PRICE ORDER BY dollars DESC""")
-        st.dataframe(money(_ladder, ['$ (52wk)', '$/Unit', '$/EQ Unit']), use_container_width=True, hide_index=True)
+        show_table(_ladder, money_cols=['$ (52wk)', '$/Unit', '$/EQ Unit'], bold_top=True)
 
         band("SPINS Conventional — Price & Promo Ladder", "Total US MULO+Conv · 52wk · volume-weighted $/unit + promo lift")
         _sppp = q("""SELECT brand_family "Brand", dollars "$ (52wk)", ROUND(dollar_share_pct,1) "Share %",
@@ -1049,7 +1100,7 @@ c-store numbers.</p>""")
                             ROUND(pct_incremental,1) "% Incremental"
                      FROM GOLD_V3_DB.SALES.REVOPS_SPINS_COMPETITIVE
                      WHERE geography_raw='TOTAL US - MULO + CONVENIENCE' ORDER BY dollars DESC""")
-        st.dataframe(money(_sppp, ['$ (52wk)', '$/Unit (wtd)']), use_container_width=True, hide_index=True)
+        show_table(_sppp, money_cols=['$ (52wk)', '$/Unit (wtd)'], bold_top=True)
         st.caption("Volume-weighted $/unit (Σ$ ÷ Σunits) — the comparable price. MIT45 ≈ $19/unit vs Botanic Tonics "
                    "≈ $10 and the field ≈ $9–10: MIT45 is the premium-priced one in BOTH panels (Nielsen $17). "
                    "MIT45's low/negative % incremental = it isn't promoting. Use base-vs-incremental to test "
