@@ -67,6 +67,24 @@ table.rv-table td.goal {{ color:{T['text3']}; font-size:11px; }}
 .rv-badge {{ font-size:10px; padding:1px 6px; border-radius:3px; font-family:'IBM Plex Mono',monospace; }}
 .rv-real {{ background:{T['g_bg']}; color:{T['g_fg']}; }}
 .rv-proxy {{ background:{T['y_bg']}; color:{T['y_fg']}; }}
+/* ── density: cut vertical whitespace so more fits without scrolling ── */
+.block-container {{ padding-top:1.1rem; padding-bottom:1rem; max-width:1500px; }}
+[data-testid="stVerticalBlock"] {{ gap:0.5rem; }}
+[data-testid="stHorizontalBlock"] {{ gap:0.8rem; }}
+[data-testid="stDataFrame"] {{ font-size:12px; }}
+[data-testid="stCaptionContainer"] {{ margin-top:-3px; font-size:11px; line-height:1.35; }}
+.rv-band {{ margin-top:9px; }}
+.rv-tiles {{ margin:4px 0 2px; }}
+/* compact help expander */
+details[data-testid="stExpander"] {{ border:1px dashed {T['border']}; border-radius:6px;
+    margin:2px 0 4px; background:#fbfcfe; }}
+details[data-testid="stExpander"] summary {{ font-size:12px; color:{T['text2']};
+    font-family:'IBM Plex Mono',monospace; padding:5px 10px; }}
+details[data-testid="stExpander"] summary:hover {{ color:{T['hdr_bg']}; }}
+.rv-help h4 {{ font-size:12px; margin:8px 0 3px; color:{T['hdr_bg']};
+    font-family:'IBM Plex Mono',monospace; text-transform:uppercase; letter-spacing:.04em; }}
+.rv-help p, .rv-help li {{ font-size:12.5px; line-height:1.5; color:{T['text']}; margin:2px 0; }}
+.rv-help b {{ color:{T['text']}; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -124,7 +142,7 @@ def _get_session():
 
 session = _get_session()
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def q(sql):
     return session.sql(sql).to_pandas()
 
@@ -144,15 +162,27 @@ def tile(lbl, val, sub="", badge=""):
     return (f'<div class="rv-tile"><div class="lbl">{lbl} {b}</div>'
             f'<div class="val">{val}</div><div class="sub">{sub}</div></div>')
 
+def help_box(md, label="ℹ️  What am I looking at? (plain English)"):
+    """Collapsible, plain-English explanation under a table. Collapsed by default so
+    it adds no whitespace until a rep opens it."""
+    with st.expander(label):
+        st.markdown(f'<div class="rv-help">{md}</div>', unsafe_allow_html=True)
+
 # ── Header + week picker ────────────────────────────────────────────────────
 st.markdown(
     '<div class="rv-header"><span class="rv-title">RevOps Signal Architecture</span>'
     '<span class="rv-sub">B2B WHOLESALE · DAILY · SELL-IN + SHELF</span></div>',
     unsafe_allow_html=True)
 
-c1, c2 = st.columns([1, 3])
+c1, c2, c3 = st.columns([1, 2, 1])
 with c1:
     anchor = st.date_input("Week of", value=date.today())
+with c3:
+    st.markdown("<div style='height:26px'></div>", unsafe_allow_html=True)
+    if st.button("🔄  Refresh data", use_container_width=True,
+                 help="Pull the latest numbers now. Data is otherwise cached for 30 min for speed."):
+        st.cache_data.clear()
+        st.rerun()
 week_start = anchor - timedelta(days=anchor.weekday())          # Monday
 days = [week_start + timedelta(days=i) for i in range(7)]
 today = date.today()
@@ -477,6 +507,69 @@ with tab_market:
                    "footprint), thin in both Nielsen c-store (~6%) and SPINS conventional (~3%). Watch the emerging "
                    "7-OH segment (7TABZ et al.) — already a top-3 brand in SPINS conventional. Tabs above drill in.")
 
+        with st.expander("📖  New to these terms? Read this first — every Market Analysis metric in plain English",
+                         expanded=False):
+            st.markdown("""<div class="rv-help">
+
+<h4>The big idea: shelf data ≠ our sales</h4>
+<p>The <b>RevOps Signal</b> tab is <b>sell-in</b> — what <b>we ship</b> to our wholesale accounts (our revenue).
+This <b>Market Analysis</b> tab is <b>sell-through</b> — what shoppers <b>actually buy off the store shelf</b>,
+measured by outside firms (Nielsen &amp; SPINS). It tells us how MIT45 is really doing at retail vs competitors,
+which is different from how much we ship.</p>
+
+<h4>Nielsen vs SPINS — why there are two</h4>
+<p>They're two different store-measurement panels. <b>Nielsen</b> (here) ≈ <b>convenience stores</b>.
+<b>SPINS</b> ≈ <b>conventional + natural/specialty</b> stores and specific chains. They count <b>different stores</b>,
+so <b>compare within one panel — never add Nielsen + SPINS together.</b></p>
+
+<h4>Distribution vs velocity — the two ways to grow</h4>
+<p>Every brand grows two ways: <b>get into more stores</b> (distribution) or <b>sell faster in the stores it's
+already in</b> (velocity). Most of these metrics are measuring one or the other.</p>
+
+<h4>$ Share (Dollar Share)</h4>
+<p>Of every $100 shoppers spend in the tracked kratom-shot category in that area, how many dollars go to this brand.
+Higher = a bigger slice of the category. This is the headline "how big are we on shelf" number.</p>
+
+<h4>%ACV &amp; ACV Share — "how widely is it stocked?"</h4>
+<p><b>ACV</b> = All-Commodity Volume. Think of it as <b>"% of stores that carry it, weighted by how big those stores
+are."</b> 100% ACV = available basically everywhere that matters; 30% = only in stores doing 30% of category volume.
+It's a <b>distribution / availability</b> measure, not a sales measure.</p>
+
+<h4>FSI (Fair Share Index) — the most important one</h4>
+<p><b>FSI = $ share ÷ distribution (ACV) share.</b> It answers: <b>"is the brand punching above or below its shelf
+presence?"</b><br>
+• <b>FSI &gt; 1.0</b> = sells <b>more</b> than its store footprint predicts → strong shopper pull. Fix = get into more stores.<br>
+• <b>FSI &lt; 1.0</b> = it's <b>on the shelf but not moving</b> → a <b>velocity problem</b>, not a distribution problem.<br>
+MIT45 ≈ <b>0.70</b>: we're stocked but under-selling our footprint. Adding doors won't fix that — moving product faster will.</p>
+
+<h4>USW (Units per Store per Week)</h4>
+<p>In the stores that <b>do</b> carry it, how many units sell per store each week. Pure <b>velocity</b> — how fast it
+moves where it's stocked. Higher is better.</p>
+
+<h4>$/Store/Wk &amp; $/TDP</h4>
+<p><b>$/Store/Wk</b> = weekly dollar sales per carrying store (velocity in dollars). <b>$/TDP</b> = dollars per
+"Total Distribution Point" — velocity adjusted for how widely distributed a brand is, so you can fairly compare a
+big brand to a small one.</p>
+
+<h4>$/EQ Unit (Equivalized Unit)</h4>
+<p>Pack sizes differ (singles, 2-packs, big bottles). EQ "equivalizes" them to one common size so prices are
+apples-to-apples. Use <b>$/EQ Unit</b> when comparing price across brands with different pack sizes.</p>
+
+<h4>% Incremental / Promo Lift</h4>
+<p>Of a brand's sales, how much came from <b>promotion</b> (deals, displays) <b>above its normal "base" rate.</b>
+High % = sales are <b>promo-driven</b>; low or zero = selling at full price with no deals. MIT45 runs <b>low</b> —
+it's the premium brand that doesn't discount. "Base vs incremental" splits normal sales from the promo-driven extra.</p>
+
+<h4>Whitespace / Untapped $ / Distribution gap</h4>
+<p>Category demand in a state that MIT45 <b>isn't capturing yet</b> — competitor-held dollars up for grabs.
+"Distribution gap" = states where the category sells but our %ACV is low (we're barely stocked there).</p>
+
+<h4>7-OH segment</h4>
+<p>A fast-growing competing product class (7-hydroxymitragynine — 7TABZ, 7 OHMZ, etc.). It's the emerging threat to
+watch; 7TABZ alone is already bigger in SPINS conventional than MIT45's whole family.</p>
+
+</div>""", unsafe_allow_html=True)
+
     # ── SHELF & SHARE (Nielsen) ──────────────────────────────────────────────
     with mt_shelf:
         cshareL, cshareR = st.columns([3, 2])
@@ -496,6 +589,15 @@ with tab_market:
             st.caption("FSI = $ share ÷ distribution (ACV) share. >1 over-indexes (sells above shelf footprint), "
                        "<1 under-indexes. MIT45 FSI ≈ 0.70 → selling below its distribution — a velocity, not a "
                        "shelf-presence, problem.")
+            help_box("""
+<p><b>What this table ranks:</b> every kratom-shot brand in convenience stores by how big a slice of category
+dollars it holds over the last 52 weeks.</p>
+<p><b>How to read a row:</b> <b>$ Share %</b> = size on shelf. <b>ACV Share %</b> = how widely it's stocked.
+<b>FSI</b> = is it punching above (&gt;1) or below (&lt;1) its shelf presence. <b>USW</b> = units sold per carrying
+store per week (raw speed).</p>
+<p><b>What to do with it:</b> a brand with high share but FSI &lt; 1 is coasting on distribution — beatable on
+velocity. A small brand with FSI &gt; 1 is a rising threat (shoppers seek it out). MIT45's low FSI says our job is
+to <b>sell faster where we already are</b>, not just chase more doors.</p>""")
         with cshareR:
             band("MIT45 Shelf-Share Trend", "share of tracked set · Total Convenience · monthly")
             trend = q("""SELECT period_month, ROUND(dollar_share_pct,1) share_pct
@@ -519,6 +621,13 @@ with tab_market:
                     AND is_latest_rolling AND usw_real IS NOT NULL
                   ORDER BY usw_real DESC LIMIT 15""")
         st.dataframe(money(nv, ['$/TDP','$/Store/Wk']), use_container_width=True, hide_index=True)
+        help_box("""
+<p><b>What this is:</b> our real shelf <b>speed</b> per MIT45 product, per state — how fast each item sells in the
+stores that carry it (not how much we shipped).</p>
+<p><b>Columns:</b> <b>USW</b> = units per store per week · <b>%ACV</b> = how widely it's stocked · <b>$/Store/Wk</b>
+= weekly dollars per carrying store · <b>$/TDP</b> = velocity adjusted for distribution.</p>
+<p><b>Use it for:</b> high USW but low %ACV = a proven winner that just needs more doors (a clean expansion pitch).
+Low USW = it's stocked but sitting — a velocity/merchandising problem to fix before adding stores.</p>""")
 
         band("Distribution-Void / OOS Watch (Nielsen)",
              "MIT45 · % stores selling — recent 4wk vs 12wk baseline · biggest drops first")
@@ -546,6 +655,13 @@ with tab_market:
         st.caption("Negative Δ = MIT45 losing shelf presence (stores carrying it) recently vs its 12-week "
                    "baseline — a void / out-of-stock / delist signal to chase per state. Proxy (Nielsen has no "
                    "weekly series here); pairs with the FSI read above.")
+        help_box("""
+<p><b>What this catches:</b> states where the <b>% of stores carrying MIT45 is dropping</b> — an early warning that
+we're getting dropped, going out of stock, or being delisted.</p>
+<p><b>Columns:</b> <b>Stores% 12w</b> = baseline distribution · <b>Stores% 4w</b> = recent · <b>Δ 4v12</b> = the
+recent change (negative = shrinking) · <b>Δ YoY</b> = vs a year ago.</p>
+<p><b>Use it for:</b> the most-negative rows are your call list — phone the distributor/buyer in that state to
+find out why we're losing shelf and win the space back before a competitor takes it.</p>""")
 
     # ── MAPS (Nielsen) ───────────────────────────────────────────────────────
     with mt_maps:
@@ -596,6 +712,16 @@ with tab_market:
                          use_container_width=True, hide_index=True)
         st.caption(f"Coloring {_map_brand} by {_map_metric}. Hover any state for share · last-4wk $ · $/unit · %ACV. "
                    "Share = % of the tracked kratom-shot set in that state. Grey = no measured sales for this brand.")
+        help_box("""
+<p><b>How to drive these maps:</b> pick a <b>brand</b>, then pick what to <b>color states by</b> ($ share, total $,
+price, or %ACV). Darker green = stronger on that metric. <b>Hover any state</b> for the full read. Grey = no measured
+sales there.</p>
+<p><b>Three maps, three jobs:</b><br>
+• <b>This map</b> — where any one brand is strong or weak.<br>
+• <b>Head-to-Head</b> — MIT45 vs one competitor; green = we lead that state, red = they lead.<br>
+• <b>Whitespace</b> — brightest states = biggest untapped category dollars MIT45 isn't getting yet (target list).</p>
+<p><b>Use it for:</b> building a geographic game plan — defend the green, attack the red, and prioritize the
+brightest whitespace states for new distribution.</p>""")
 
         # Head-to-head map
         band("Head-to-Head Map — MIT45 vs competitor by state",
@@ -725,6 +851,14 @@ with tab_market:
         st.caption("Nielsen is aggregated to state × channel — no individual store names. $/Store/Wk is the "
                    "per-store velocity proxy. Head-to-head sorted by combined retail $; 'Velocity lead' flags "
                    "who sells more per carrying store in each state.")
+        help_box("""
+<p><b>What this tab is for:</b> picking <b>any</b> brand (yours or a competitor's) and seeing its best products,
+its strongest states, and a head-to-head vs one rival — your pre-call research on a competitor.</p>
+<p><b>Top products</b> = its biggest sellers. <b>Top states</b> = where it's strongest, with $/Store/Wk showing how
+fast it moves per carrying store. <b>Head-to-head</b> = side-by-side $ and per-store velocity; <b>Velocity lead</b>
+names who sells more per store in each state.</p>
+<p><b>Use it for:</b> before you walk into a buyer, know which brand owns that state and whether MIT45 out-sells it
+per store — that's your talking point.</p>""")
 
     # ── KEY ACCOUNTS (Nielsen Circle K + SPINS chains) ───────────────────────
     with mt_acct:
@@ -765,6 +899,14 @@ with tab_market:
                 st.line_chart(_ckw.set_index('WEEK_ENDING_DATE')['WK_DOLLARS'], height=260)
         st.caption("Circle K: MIT45 underweight at 3.4% share vs 6.2% across total convenience. Botanic Tonics "
                    "owns ~69%. Tri-State is MIT45's strongest CK division, Las Vegas weakest.")
+        help_box("""
+<p><b>What this is:</b> a single chain (Circle K) broken into its sales regions, so you can see exactly where MIT45
+is strong or weak <b>inside one account</b>, plus the weekly sell-through trend.</p>
+<p><b>Read it:</b> <b>Share %</b> = MIT45's slice of the category in that CK region · <b>$/Unit</b> = our price vs
+the field · <b>%ACV</b> = how many CK stores carry us · the <b>line chart</b> = real week-over-week sales off CK
+shelves.</p>
+<p><b>Use it for:</b> a Circle K account review — point to the regions where we under-index and the weeks where
+sell-through dipped, and tie asks (more facings, a promo) to those specific gaps.</p>""")
 
         st.markdown("---")
         st.markdown("##### 🛒 SPINS C-store accounts (Maverik · Love's · Murphy · GetGo · Hy-Vee · Pilot · Wawa · Circle K)")
@@ -822,6 +964,15 @@ with tab_market:
         st.caption("SPINS own-store (CRMA) read per chain. MIT45 by $: Murphy ~$21.6M, Circle K ~$16.1M, "
                    "Wawa ~$11.8M; Wawa is MIT45's strongest by SHARE (~11%). Maverik doesn't carry MIT45 in SPINS. "
                    "Separate panel from Nielsen — compare, don't sum.")
+        help_box("""
+<p><b>What this is:</b> the same kind of account read as Circle K above, but from the <b>SPINS</b> panel, for the
+big c-store chains it tracks (Murphy, Love's, Wawa, GetGo, etc.). Pick a chain to see MIT45's rank, share, price,
+and weekly trend inside it.</p>
+<p><b>Heads-up:</b> SPINS and Nielsen measure <b>different stores</b> — use this to understand a chain, but
+<b>don't add</b> SPINS dollars to Nielsen dollars. "No measured sales" means MIT45 isn't carried there (or is below
+reporting), which is itself a prospecting signal.</p>
+<p><b>Use it for:</b> chain-specific prep — Wawa is our strongest by share, Maverik doesn't carry us at all (a clear
+target). Walk in knowing where we stand in <b>their</b> stores.</p>""")
 
     # ── CHANNELS & SPINS ─────────────────────────────────────────────────────
     with mt_chan:
@@ -862,6 +1013,16 @@ with tab_market:
                    "California / West (BT 70%+). The 7-OH segment concentrates in the Southeast (~33%) and "
                    "Mid-South (~26%) — watch those regions. Regions are SPINS' MULO+Conv standard regions "
                    "(not account-specific).")
+        help_box("""
+<p><b>What this tab adds:</b> the SPINS view of the whole category — including conventional + natural/specialty
+stores that Nielsen's c-store cut misses — plus a watch on the fast-rising 7-OH segment and a region-by-region
+share grid.</p>
+<p><b>Share matrix:</b> read <b>across a row</b> to see MIT45 vs every competitor <b>within one region</b>. It
+exposes where we're concentrated (Northeast) and where we're nearly absent (West).</p>
+<p><b>Why 7-OH matters:</b> it's a new product class growing on promotion — 7TABZ alone is already bigger than
+MIT45's entire family in this panel. High "% incremental" = that growth is deal-driven.</p>
+<p><b>Use it for:</b> spotting regional whitespace and emerging competitive threats before they show up in the
+c-store numbers.</p>""")
 
     # ── PROMO & PRICE ────────────────────────────────────────────────────────
     with mt_promo:
@@ -884,3 +1045,12 @@ with tab_market:
                    "MIT45's low/negative % incremental = it isn't promoting. Use base-vs-incremental to test "
                    "price elasticity before any move. (Raw per-SKU ARP only meaningful at UPC grain — a simple "
                    "average across UPCs over-weights tiny premium SKUs, which is why an earlier '$25' showed.)")
+        help_box("""
+<p><b>What these ladders show:</b> where every brand sits on <b>price</b> and how much it leans on <b>promotion</b>,
+in both the Circle K (Nielsen) and conventional (SPINS) panels.</p>
+<p><b>Columns:</b> <b>$/Unit</b> = comparable shelf price · <b>$/EQ Unit</b> = price after normalizing pack sizes
+(the fairest comparison) · <b>% Promo / % Incremental</b> = how much of sales comes from deals.</p>
+<p><b>The MIT45 story:</b> we're the <b>premium</b> price (~$17–19 vs ~$9–10 for the field) and we <b>barely
+promote</b> (low % incremental). That's a deliberate position — but it means we win on brand, not price.</p>
+<p><b>Use it for:</b> any pricing or promo conversation — see the gap to competitors, and use base-vs-incremental
+to gauge whether a promo would actually lift volume before committing spend.</p>""")

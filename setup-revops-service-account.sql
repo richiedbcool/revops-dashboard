@@ -8,7 +8,7 @@ CREATE ROLE IF NOT EXISTS REVOPS_DASHBOARD_RO;
 -- 2. Small dedicated warehouse (auto-suspends fast to keep cost near zero)
 CREATE WAREHOUSE IF NOT EXISTS REVOPS_DASHBOARD_WH
   WAREHOUSE_SIZE = 'XSMALL'
-  AUTO_SUSPEND = 60
+  AUTO_SUSPEND = 300   -- 5 min: stays warm during an active session to avoid cold-start lag
   AUTO_RESUME = TRUE
   INITIALLY_SUSPENDED = TRUE;
 GRANT USAGE ON WAREHOUSE REVOPS_DASHBOARD_WH TO ROLE REVOPS_DASHBOARD_RO;
