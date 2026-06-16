@@ -613,13 +613,18 @@ to <b>sell faster where we already are</b>, not just chase more doors.</p>""")
                            "ends Dec-2025; 2026 only in rolling aggregates).")
 
         band("Shelf Velocity (Nielsen)", "REAL · MIT45 brand · per product×state · Latest 4 Wks · W/E 05-30-2026")
-        nv = q("""SELECT state "State", product_description "Product",
-                         ROUND(usw_real,2) "USW", ROUND(pct_acv,2) "%ACV",
-                         dollar_per_tdp "$/TDP", dollar_per_store_week "$/Store/Wk"
-                  FROM GOLD_V3_DB.SALES.REVOPS_NIELSEN_LIVE
-                  WHERE is_mit45 AND NOT is_market_total AND period_type='Latest 4 Weeks'
-                    AND is_latest_rolling AND usw_real IS NOT NULL
-                  ORDER BY usw_real DESC LIMIT 15""")
+        nv = q("""SELECT n.state "State",
+                         COALESCE(p.product_clean, n.product_description) "Product",
+                         ROUND(AVG(n.usw_real),2) "USW", ROUND(AVG(n.pct_acv),2) "%ACV",
+                         ROUND(AVG(n.dollar_per_tdp),2) "$/TDP",
+                         ROUND(AVG(n.dollar_per_store_week),2) "$/Store/Wk"
+                  FROM GOLD_V3_DB.SALES.REVOPS_NIELSEN_LIVE n
+                  LEFT JOIN GOLD_V3_DB.SALES.REVOPS_PRODUCT_NAMES p
+                    ON p.upc_core = LPAD(REPLACE(n.upc,'-',''),12,'0')
+                  WHERE n.is_mit45 AND NOT n.is_market_total AND n.period_type='Latest 4 Weeks'
+                    AND n.is_latest_rolling AND n.usw_real IS NOT NULL
+                  GROUP BY 1, 2
+                  ORDER BY AVG(n.usw_real) DESC LIMIT 15""")
         st.dataframe(money(nv, ['$/TDP','$/Store/Wk']), use_container_width=True, hide_index=True)
         help_box("""
 <p><b>What this is:</b> our real shelf <b>speed</b> per MIT45 product, per state — how fast each item sells in the
@@ -632,14 +637,17 @@ Low USW = it's stocked but sitting — a velocity/merchandising problem to fix b
         band("Distribution-Void / OOS Watch (Nielsen)",
              "MIT45 · % stores selling — recent 4wk vs 12wk baseline · biggest drops first")
         oos = q("""WITH d AS (
-                     SELECT state "State", product_description "Product",
-                       AVG(IFF(period_type='Latest 12 Weeks',     pct_stores_selling, NULL)) sps_12w,
-                       AVG(IFF(period_type='Latest 4 Weeks',      pct_stores_selling, NULL)) sps_4w,
-                       AVG(IFF(period_type='Latest 52 Weeks',     pct_stores_selling, NULL)) sps_52w,
-                       AVG(IFF(period_type='Latest 52 Weeks YoY', pct_stores_selling, NULL)) sps_52w_ya
-                     FROM GOLD_V3_DB.SALES.REVOPS_NIELSEN_LIVE
-                     WHERE is_mit45 AND NOT is_market_total AND is_latest_rolling
-                       AND period_type IN ('Latest 4 Weeks','Latest 12 Weeks',
+                     SELECT n.state "State",
+                       COALESCE(p.product_clean, n.product_description) "Product",
+                       AVG(IFF(n.period_type='Latest 12 Weeks',     n.pct_stores_selling, NULL)) sps_12w,
+                       AVG(IFF(n.period_type='Latest 4 Weeks',      n.pct_stores_selling, NULL)) sps_4w,
+                       AVG(IFF(n.period_type='Latest 52 Weeks',     n.pct_stores_selling, NULL)) sps_52w,
+                       AVG(IFF(n.period_type='Latest 52 Weeks YoY', n.pct_stores_selling, NULL)) sps_52w_ya
+                     FROM GOLD_V3_DB.SALES.REVOPS_NIELSEN_LIVE n
+                     LEFT JOIN GOLD_V3_DB.SALES.REVOPS_PRODUCT_NAMES p
+                       ON p.upc_core = LPAD(REPLACE(n.upc,'-',''),12,'0')
+                     WHERE n.is_mit45 AND NOT n.is_market_total AND n.is_latest_rolling
+                       AND n.period_type IN ('Latest 4 Weeks','Latest 12 Weeks',
                                            'Latest 52 Weeks','Latest 52 Weeks YoY')
                      GROUP BY 1,2)
                    SELECT "State", "Product",
@@ -810,13 +818,15 @@ brightest whitespace states for new distribution.</p>""")
         _exb = _ex_brand.replace("'", "''")
 
         st.markdown(f"**Top products — {_ex_brand}**")
-        _ce_prod = q(f"""SELECT product_description "Product", upc "UPC",
-                                SUM(total_dollar_sales) "$ (52wk)", ROUND(SUM(total_unit_sales)) "Units",
-                                ROUND(AVG(pct_acv),1) "%ACV"
-                         FROM GOLD_V3_DB.SALES.REVOPS_NIELSEN_LIVE
-                         WHERE is_market_total AND period_type='Latest 52 Weeks' AND is_latest_rolling
-                           AND brand_name='{_exb}'
-                         GROUP BY 1,2 ORDER BY 3 DESC LIMIT 8""")
+        _ce_prod = q(f"""SELECT COALESCE(p.product_clean, n.product_description) "Product",
+                                SUM(n.total_dollar_sales) "$ (52wk)", ROUND(SUM(n.total_unit_sales)) "Units",
+                                ROUND(AVG(n.pct_acv),1) "%ACV"
+                         FROM GOLD_V3_DB.SALES.REVOPS_NIELSEN_LIVE n
+                         LEFT JOIN GOLD_V3_DB.SALES.REVOPS_PRODUCT_NAMES p
+                           ON p.upc_core = LPAD(REPLACE(n.upc,'-',''),12,'0')
+                         WHERE n.is_market_total AND n.period_type='Latest 52 Weeks' AND n.is_latest_rolling
+                           AND n.brand_name='{_exb}'
+                         GROUP BY 1 ORDER BY 2 DESC LIMIT 8""")
         st.dataframe(money(_ce_prod, ['$ (52wk)']), use_container_width=True, hide_index=True)
 
         st.markdown(f"**Top states — {_ex_brand}**  ·  $/Store/Wk = what each carrying store sells weekly")
