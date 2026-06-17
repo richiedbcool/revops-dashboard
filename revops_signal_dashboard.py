@@ -155,13 +155,21 @@ def _get_session():
         "warehouse": st.secrets["sf_warehouse"],
         "database": st.secrets.get("sf_database", "GOLD_V3_DB"),
         "schema": st.secrets.get("sf_schema", "SALES"),
+        # Heartbeat keeps the session/token alive across idle periods (e.g. overnight)
+        # so the cached session doesn't go stale and fail on the next morning's query.
+        "client_session_keep_alive": True,
     }).create()
 
 session = _get_session()
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def q(sql):
-    return session.sql(sql).to_pandas()
+    try:
+        return _get_session().sql(sql).to_pandas()
+    except Exception:
+        # Session likely expired/stale — drop the cached one, rebuild, and retry once.
+        _get_session.clear()
+        return _get_session().sql(sql).to_pandas()
 
 def money(df, cols):
     """Format money columns as $0,000.00 strings for readability."""
