@@ -100,27 +100,15 @@ def q(sql):
     return session.sql(sql).to_pandas()
 
 # ── Data: MTD revenue + orders per salesperson, + ADP roles ─────────────────
+# Reads GOLD_V3_DB.SALES secure views (owned by a role that can read RAW_V2_DB;
+# REVOPS_DASHBOARD_RO has SELECT on them but no raw access). The validated revenue
+# math lives in V_SALES_COMMISSION_MTD; ADP roles (name + title only, no pay PII)
+# in V_SALES_REP_ROLES. See sales_commission_views.sql.
 @st.cache_data(ttl=600, show_spinner=False)
 def load_mtd():
     return q("""
-        WITH ln AS (
-          SELECT so.SALESPERSON,
-                 so.SO_NUMBER,
-                 TRY_TO_DATE(LEFT(s.COMPLETED_AT,10)) AS comp_date,
-                 TRY_CAST(sl.QUANTITY AS NUMBER(18,4))
-                   * TRY_CAST(sol.UNIT_PRICE AS NUMBER(18,4)) AS rev
-          FROM RAW_V2_DB.SUPABASE_ERP.SALES_ORDER_SHIPMENTS s
-          JOIN RAW_V2_DB.SUPABASE_ERP.SALES_ORDERS so ON so.ID = s.SALES_ORDER_ID
-          JOIN RAW_V2_DB.SUPABASE_ERP.SALES_ORDER_SHIPMENT_LINES sl ON sl.SHIPMENT_ID = s.ID
-          LEFT JOIN RAW_V2_DB.SUPABASE_ERP.SALES_ORDER_LINES sol ON sol.ID = sl.SALES_ORDER_LINE_ID
-          WHERE TRY_TO_DATE(LEFT(s.COMPLETED_AT,10)) >= DATE_TRUNC('month', CURRENT_DATE())
-        )
-        SELECT SALESPERSON,
-               ROUND(SUM(rev),2)         AS MTD_REVENUE,
-               COUNT(DISTINCT SO_NUMBER) AS NUM_ORDERS
-        FROM ln
-        WHERE SALESPERSON <> 'Sales Admin'
-        GROUP BY SALESPERSON
+        SELECT SALESPERSON, MTD_REVENUE, NUM_ORDERS
+        FROM GOLD_V3_DB.SALES.V_SALES_COMMISSION_MTD
     """)
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -128,7 +116,7 @@ def load_adp_roles():
     names = ", ".join("'" + r[2].replace("'", "''") + "'" for r in ROSTER)
     df = q(f"""
         SELECT FORMATTED_NAME, POSITION_TITLE
-        FROM RAW_V2_DB.ADP.WORKERS
+        FROM GOLD_V3_DB.SALES.V_SALES_REP_ROLES
         WHERE FORMATTED_NAME IN ({names})
     """)
     return dict(zip(df["FORMATTED_NAME"], df["POSITION_TITLE"]))
