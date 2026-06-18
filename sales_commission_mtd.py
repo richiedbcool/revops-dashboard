@@ -25,24 +25,25 @@ from snowflake.snowpark.context import get_active_session
 
 st.set_page_config(page_title="Sales Commission — MTD", layout="wide")
 
-# ── Roster crosswalk ────────────────────────────────────────────────────────
-# Names differ across systems: ADP stores "Family, Given"; SALES_ORDERS stores a
-# free-text "Given Family" (note Miguel is "Gonzales" with an s in orders vs
-# "Gonzalez" everywhere else). Role is pulled live from ADP.WORKERS by adp_name.
-# mtd_target: derived from the Dec-2027 monthly EXIT targets discounted back at
-# each rep's CMGR to the June-2026 month-0 anchor (~$500K). PENDING RICHIE'S
-# CONFIRMATION — edit here once locked. William (Inside Sales) + Corey (VP) have
-# no exit target in the plan, so left as None (blank).
+# ── Roster ──────────────────────────────────────────────────────────────────
+# Revenue/orders now come from GOLD_V3_DB.SCORECARD.FCT_SALES_REP_REVENUE_DAILY,
+# which already carries REP_DISPLAY_NAME + ROLE + IS_SCORECARD_REP (verified equal
+# to the prior validated shipment-completion math, 2026-06-18). So no more ADP name
+# crosswalk / Gonzales-vs-Gonzalez handling — we join by display name. This roster
+# stays only to (a) render reps with $0 MTD, (b) hold targets + the prepayment rule.
+# mtd_target: derived from the Dec-2027 monthly EXIT targets discounted at each rep's
+# CMGR to the June-2026 anchor (~$500K). PENDING RICHIE'S CONFIRMATION. William
+# (Inside Sales) + Corey (VP) have no exit target → None (blank).
 ROSTER = [
-    # display,            order_name (SALES_ORDERS.SALESPERSON), adp_name (ADP.FORMATTED_NAME), inside_sales, mtd_target
-    ("Miguel Gonzalez",   "Miguel Gonzales",  "Gonzalez, Miguel",         False, 502_000),
-    ("Melinda Kingston",  "Melinda Kingston", "Kingston, Melinda Orlean", False, 502_000),
-    ("Santo Perry",       "Santo Perry",      "Perry, Santo A",           False, 497_000),
-    ("Nelson Rosario",    "Nelson Rosario",   "Rosario, Nelson",          False, 500_000),
-    ("Kamala Watkins",    "Kamala Watkins",   "Lambert-Watkins, Kamala",  False, 496_000),
-    ("Quinn McHenry",     "Quinn McHenry",    "McHenry, Quinn Louis",     False, 496_000),
-    ("William Stevens",   "William Stevens",  "Stevens, William",         True,  None),
-    ("Corey Helper",      "Corey Helper",     "Helper, Corey Leigh",      False, None),
+    # display,            role,                              inside_sales, mtd_target
+    ("Miguel Gonzalez",   "Regional Sales Manager",          False, 502_000),
+    ("Melinda Kingston",  "Regional Sales Manager",          False, 502_000),
+    ("Santo Perry",       "Regional Sales Manager",          False, 497_000),
+    ("Nelson Rosario",    "Regional Sales Manager",          False, 500_000),
+    ("Kamala Watkins",    "Key Account Manager",             False, 496_000),
+    ("Quinn McHenry",     "Regional Sales Manager",          False, 496_000),
+    ("William Stevens",   "Inside Sales Representative",      True,  None),
+    ("Corey Helper",      "VP, Sales & Commercial Strategy",  False, None),
 ]
 INSIDE_SALES_PREPAYMENT = 1_500.0
 
@@ -99,40 +100,34 @@ session = _get_session()
 def q(sql):
     return session.sql(sql).to_pandas()
 
-# ── Data: MTD revenue + orders per salesperson, + ADP roles ─────────────────
-# Reads GOLD_V3_DB.SALES secure views (owned by a role that can read RAW_V2_DB;
-# REVOPS_DASHBOARD_RO has SELECT on them but no raw access). The validated revenue
-# math lives in V_SALES_COMMISSION_MTD; ADP roles (name + title only, no pay PII)
-# in V_SALES_REP_ROLES. See sales_commission_views.sql.
+# ── Data: MTD revenue + orders per rep, from the dbt scorecard model ─────────
+# GOLD_V3_DB.SCORECARD.FCT_SALES_REP_REVENUE_DAILY (REVENUE_DATE = shipment
+# COMPLETED_AT; Sales Admin / DTC excluded via IS_SCORECARD_REP). Verified equal to
+# the prior V_SALES_COMMISSION_MTD math to the dollar, so those interim views are
+# retired. REVOPS_DASHBOARD_RO has SELECT + schema USAGE on SCORECARD.
 @st.cache_data(ttl=600, show_spinner=False)
 def load_mtd():
     return q("""
-        SELECT SALESPERSON, MTD_REVENUE, NUM_ORDERS
-        FROM GOLD_V3_DB.SALES.V_SALES_COMMISSION_MTD
+        SELECT REP_DISPLAY_NAME AS REP,
+               ROUND(SUM(TOTAL_REVENUE_AMT),2) AS MTD_REVENUE,
+               SUM(ORDER_COUNT)                AS NUM_ORDERS
+        FROM GOLD_V3_DB.SCORECARD.FCT_SALES_REP_REVENUE_DAILY
+        WHERE IS_SCORECARD_REP = TRUE
+          AND REVENUE_DATE >= DATE_TRUNC('month', CURRENT_DATE())
+        GROUP BY REP_DISPLAY_NAME
     """)
-
-@st.cache_data(ttl=600, show_spinner=False)
-def load_adp_roles():
-    names = ", ".join("'" + r[2].replace("'", "''") + "'" for r in ROSTER)
-    df = q(f"""
-        SELECT FORMATTED_NAME, POSITION_TITLE
-        FROM GOLD_V3_DB.SALES.V_SALES_REP_ROLES
-        WHERE FORMATTED_NAME IN ({names})
-    """)
-    return dict(zip(df["FORMATTED_NAME"], df["POSITION_TITLE"]))
 
 mtd = load_mtd()
-rev_by_name = dict(zip(mtd["SALESPERSON"], mtd["MTD_REVENUE"]))
-ord_by_name = dict(zip(mtd["SALESPERSON"], mtd["NUM_ORDERS"]))
-roles = load_adp_roles()
+rev_by_rep = dict(zip(mtd["REP"], mtd["MTD_REVENUE"]))
+ord_by_rep = dict(zip(mtd["REP"], mtd["NUM_ORDERS"]))
 
 rows = []
-for display, order_name, adp_name, inside, target in ROSTER:
+for display, role, inside, target in ROSTER:
     rows.append({
         "Rep": display,
-        "Role": roles.get(adp_name, ""),
-        "MTD Revenue": float(rev_by_name.get(order_name, 0) or 0),
-        "# Orders": int(ord_by_name.get(order_name, 0) or 0),
+        "Role": role,
+        "MTD Revenue": float(rev_by_rep.get(display, 0) or 0),
+        "# Orders": int(ord_by_rep.get(display, 0) or 0),
         "MTD Target": target,                                   # may be None
         "Comm %": None,                                         # HR fills at month-end
         "Payout": None,                                         # = Revenue × Comm%
