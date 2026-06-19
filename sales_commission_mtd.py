@@ -49,8 +49,11 @@ INSIDE_SALES_PREPAYMENT = 1_500.0
 
 # ── Shared-password gate (mirrors revops_signal_dashboard.py) ───────────────
 def _check_password():
-    if "APP_PASSWORD" not in st.secrets:
-        return True  # Streamlit-in-Snowflake → already authed
+    try:
+        if "APP_PASSWORD" not in st.secrets:
+            return True  # no APP_PASSWORD → Streamlit-in-Snowflake (ambient auth)
+    except Exception:
+        return True  # no secrets.toml at all → don't gate (ambient/unconfigured)
     if st.session_state.get("_authed"):
         return True
     st.title("Sales Commission — MTD")

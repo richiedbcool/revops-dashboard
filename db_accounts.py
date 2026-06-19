@@ -46,8 +46,11 @@ table.da-table tr:nth-child(even) td {{ background:{T['row_alt']}; }}
 
 # ── Shared-password gate ────────────────────────────────────────────────────
 def _check_password():
-    if "APP_PASSWORD" not in st.secrets:
-        return
+    try:
+        if "APP_PASSWORD" not in st.secrets:
+            return  # no APP_PASSWORD → Streamlit-in-Snowflake (ambient auth)
+    except Exception:
+        return  # no secrets.toml at all → don't gate (ambient/unconfigured)
     if st.session_state.get("_authed"):
         return
     st.markdown('<div class="da-header"><span class="da-title">DB Accounts</span>'
