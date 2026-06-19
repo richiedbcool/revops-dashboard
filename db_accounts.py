@@ -50,12 +50,14 @@ def _check_password():
         return
     if st.session_state.get("_authed"):
         return
-    st.text_input("Password", type="password", key="_pw",
-                  label_visibility="collapsed", placeholder="Password")
-    if st.session_state.get("_pw") == st.secrets["APP_PASSWORD"]:
+    st.markdown('<div class="da-header"><span class="da-title">DB Accounts</span>'
+                '<span class="da-sub">ENTER PASSWORD TO CONTINUE</span></div>',
+                unsafe_allow_html=True)
+    pw = st.text_input("Password", type="password")   # visible label → not clipped
+    if pw == st.secrets["APP_PASSWORD"]:
         st.session_state["_authed"] = True
         st.rerun()
-    elif st.session_state.get("_pw"):
+    elif pw:
         st.error("Incorrect password.")
     st.stop()
 
