@@ -16,7 +16,16 @@ Revenue math (reverse-engineered + validated 2026-06-17):
   period  = shipment COMPLETED_AT in the current calendar month
   #orders = distinct SO_NUMBER
   Sales Admin bucket excluded (moving in-house sales to the group soon).
+
+Manual trackers (added 2026-06-22, values entered by hand in the Excel export
+while the app stays read-only):
+  • Inside Sales draw balance — cumulative advance vs. commission recovered to
+    date (separate from the recurring $1,500/mo prepayment, which is unchanged).
+  • Door coverage — active retail locations now vs. end-of-quarter target per
+    field rep (leading indicator for next quarter), plus Corey's national-account
+    doors tracked in a separate block.
 """
+import calendar
 import streamlit as st
 import pandas as pd
 from io import BytesIO
@@ -151,6 +160,47 @@ show["Payout"]      = "—"
 show["Prepayment"]  = show["Prepayment"].map(lambda v: f"${v:,.0f}" if v else "—")
 st.dataframe(show, use_container_width=True, hide_index=True)
 
+NATIONAL_ROLE = "VP, Sales & Commercial Strategy"
+
+# end of the current calendar quarter (for the door target horizon)
+_q_end_month = ((date.today().month - 1) // 3) * 3 + 3
+quarter_end = date(date.today().year, _q_end_month,
+                   calendar.monthrange(date.today().year, _q_end_month)[1])
+
+# ── Inside Sales draw balance (running advance vs. recovery) ─────────────────
+# The monthly $1,500 prepayment in the table above is unchanged; this tracks the
+# CUMULATIVE advance and how much commission has recovered it over time. Advanced /
+# Recovered are entered by hand in the Excel export (app is read-only).
+st.subheader("Inside Sales — Draw Balance")
+st.caption("Cumulative advance vs. commission recovered to date. The monthly $1,500 "
+           "prepayment above still applies; enter Recovered to Date in the Excel export.")
+draw_rows = [{
+    "Rep": display,
+    "Advanced to Date": f"${INSIDE_SALES_PREPAYMENT:,.0f}",
+    "Recovered to Date": "—",
+    "Remaining Balance": "—",
+} for display, role, inside, target in ROSTER if inside]
+st.dataframe(pd.DataFrame(draw_rows), use_container_width=True, hide_index=True)
+
+# ── Door coverage (leading indicator for next quarter's revenue) ────────────
+st.subheader("Door Coverage — Retail")
+st.caption(f"Active retail locations each rep is selling into now vs. their target by "
+           f"end of quarter ({quarter_end:%b %-d, %Y}). Enter Active / Target in the Excel export.")
+door_rows = [{
+    "Rep": display,
+    "Active Doors (now)": "—",
+    "EOQ Target": "—",
+    "Doors to Go": "—",
+} for display, role, inside, target in ROSTER if role != NATIONAL_ROLE]
+st.dataframe(pd.DataFrame(door_rows), use_container_width=True, hide_index=True)
+
+st.subheader("National Account Doors — Corey Helper")
+st.caption("National retail locations delivered vs. target, tracked separately from the "
+           "field reps' retail doors. Enter per-account numbers in the Excel export.")
+st.dataframe(pd.DataFrame([{
+    "Doors Delivered": "—", "Target": "—", "Doors to Go": "—",
+}]), use_container_width=True, hide_index=True)
+
 # ── Excel export with LIVE formulas ─────────────────────────────────────────
 def build_excel(df):
     from openpyxl import Workbook
@@ -194,6 +244,81 @@ def build_excel(df):
                    "Type a commission rate into Comm % (e.g. 5%). Payout = Revenue × Comm%. "
                    "Net Payout = Payout − Prepayment (Inside Sales $1,500 advance; negative = owed back).")
     note.font = Font(italic=True, color="6B7280")
+
+    def _style_header(sheet, row, headers):
+        for c, h in enumerate(headers, start=1):
+            cell = sheet.cell(row, c, h)
+            cell.fill = hdr_fill; cell.font = hdr_font
+            cell.alignment = Alignment(horizontal="center"); cell.border = border
+
+    # ── Sheet 2: Inside Sales draw balance ──────────────────────────────────
+    # Cumulative advance vs. recovery (separate from the recurring monthly prepayment
+    # on Sheet 1). Advanced defaults to the $1,500 already paid — edit if more was
+    # advanced; enter Recovered to Date by hand. Remaining Balance is a live formula.
+    ws2 = wb.create_sheet("Draw Balance")
+    d_headers = ["Rep", "Advanced to Date", "Recovered to Date", "Remaining Balance", "Notes"]
+    _style_header(ws2, 1, d_headers)
+    r = 2
+    for display, role, inside, target in ROSTER:
+        if not inside:
+            continue
+        ws2.cell(r, 1, display)
+        ws2.cell(r, 2, float(INSIDE_SALES_PREPAYMENT))   # Advanced to Date — edit if more advanced
+        ws2.cell(r, 3, None)                             # Recovered to Date — fill in by hand
+        ws2.cell(r, 4, f"=B{r}-C{r}")                    # Remaining Balance = Advanced − Recovered
+        for col in ["B", "C", "D"]:
+            ws2[f"{col}{r}"].number_format = '$#,##0.00'
+        for c in range(1, len(d_headers) + 1):
+            ws2.cell(r, c).border = border
+        r += 1
+    for col, w in {"A": 20, "B": 16, "C": 17, "D": 17, "E": 34}.items():
+        ws2.column_dimensions[col].width = w
+    ws2.cell(r + 1, 1,
+             "Advanced to Date = cumulative advances paid to the rep. Recovered to Date = "
+             "commission already applied against it. Remaining Balance = Advanced − Recovered "
+             "(what's still owed back).").font = Font(italic=True, color="6B7280")
+
+    # ── Sheet 3: Door coverage ──────────────────────────────────────────────
+    # Retail doors per field rep (Active now vs. EOQ target), then a separate
+    # block for Corey's national accounts. All counts entered by hand; "Doors to
+    # Go" = Target − Active is a live formula.
+    ws3 = wb.create_sheet("Door Coverage")
+    ws3.cell(1, 1, f"Retail Doors — active locations now vs. end-of-quarter target "
+                   f"({quarter_end:%b %-d, %Y})").font = Font(bold=True)
+    rd_headers = ["Rep", "Active Doors (now)", "EOQ Target", "Doors to Go"]
+    _style_header(ws3, 2, rd_headers)
+    r = 3
+    for display, role, inside, target in ROSTER:
+        if role == NATIONAL_ROLE:
+            continue
+        ws3.cell(r, 1, display)
+        ws3.cell(r, 2, None)                  # Active Doors — fill in
+        ws3.cell(r, 3, None)                  # EOQ Target — fill in
+        ws3.cell(r, 4, f"=C{r}-B{r}")         # Doors to Go = Target − Active
+        for c in range(1, len(rd_headers) + 1):
+            ws3.cell(r, c).border = border
+        r += 1
+
+    r += 1
+    ws3.cell(r, 1, "National Account Doors — Corey Helper (tracked separately)").font = Font(bold=True)
+    na_hdr_row = r + 1
+    na_headers = ["Account / Channel", "Doors Delivered", "Target", "Doors to Go"]
+    _style_header(ws3, na_hdr_row, na_headers)
+    first_na = na_hdr_row + 1
+    r = first_na
+    for _ in range(6):                        # blank rows to list national accounts
+        ws3.cell(r, 4, f"=C{r}-B{r}")         # Doors to Go = Target − Delivered
+        for c in range(1, len(na_headers) + 1):
+            ws3.cell(r, c).border = border
+        r += 1
+    ws3.cell(r, 1, "Total").font = Font(bold=True)
+    ws3.cell(r, 2, f"=SUM(B{first_na}:B{r-1})")
+    ws3.cell(r, 3, f"=SUM(C{first_na}:C{r-1})")
+    ws3.cell(r, 4, f"=C{r}-B{r}")
+    for c in range(1, len(na_headers) + 1):
+        ws3.cell(r, c).border = border
+    for col, w in {"A": 28, "B": 16, "C": 12, "D": 12}.items():
+        ws3.column_dimensions[col].width = w
 
     bio = BytesIO(); wb.save(bio); return bio.getvalue()
 
