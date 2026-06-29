@@ -11,12 +11,21 @@ from snowflake.snowpark.context import get_active_session
 
 st.set_page_config(page_title="DB Accounts", layout="wide")
 
-# Watched key accounts (singular J&M variant kept just in case)
+# Watched key accounts, by canonical display name (singular J&M variant kept just in case)
 ACCOUNTS = [
     'Red Dawn', 'Annbiz FL', 'Annbiz GA', 'Phresh Picks Distribution, Inc.',
     'NJ Imports', 'Mountain Service Distributors', 'Full House Wholesale',
     'J&M Distributors', 'J&M Distributor',
 ]
+
+# Raw ERP customer name → canonical account, for accounts that appear under more
+# than one name across the old/new ERP. The new ERP renamed "Full House Wholesale"
+# to "HGR Packaging Inc FKA Full House Wholesale"; both names roll up into one row
+# so YTD sums across the full year and last-purchase reflects the latest of either.
+# Add a line here whenever the ERP renames a watched account.
+ALIASES = {
+    'HGR Packaging Inc FKA Full House Wholesale': 'Full House Wholesale',
+}
 
 # ── Theme (from revops_signal_dashboard.py) ─────────────────────────────────
 T = {"bg": "#ffffff", "border": "#dde2e9", "text": "#1f2937", "text3": "#6b7280",
@@ -94,24 +103,35 @@ def _get_session():
 
 session = _get_session()
 
+def _sql_str(s):
+    return "'" + s.replace("'", "''") + "'"
+
 @st.cache_data(ttl=600, show_spinner=False)
 def load_accounts():
-    names = ", ".join("'" + a.replace("'", "''") + "'" for a in ACCOUNTS)
+    # Watch every canonical name plus any raw alias names, then fold aliases into
+    # their canonical account so each shows as one rolled-up row.
+    names = ", ".join(_sql_str(a) for a in sorted(set(ACCOUNTS) | set(ALIASES)))
+    if ALIASES:
+        whens = " ".join(f"WHEN CUSTOMER_NAME = {_sql_str(raw)} THEN {_sql_str(canon)}"
+                         for raw, canon in ALIASES.items())
+        acct_expr = f"CASE {whens} ELSE CUSTOMER_NAME END"
+    else:
+        acct_expr = "CUSTOMER_NAME"
     return session.sql(f"""
         WITH u AS (
-            SELECT CUSTOMER_NAME, SALE_DATE, REVENUE
+            SELECT {acct_expr} AS ACCOUNT, SALE_DATE, REVENUE
             FROM GOLD_V3_DB.SALES.REVOPS_SALES_UNIFIED
             WHERE SALE_DATE >= DATE_TRUNC('year', CURRENT_DATE)
               AND CUSTOMER_NAME IN ({names})
         ),
-        ytd AS (SELECT CUSTOMER_NAME, SUM(REVENUE) AS YTD_PURCHASES FROM u GROUP BY 1),
+        ytd AS (SELECT ACCOUNT, SUM(REVENUE) AS YTD_PURCHASES FROM u GROUP BY 1),
         last_day AS (
-            SELECT CUSTOMER_NAME, SALE_DATE AS LAST_PURCHASE_DATE, SUM(REVENUE) AS LAST_PURCHASE_AMT
+            SELECT ACCOUNT, SALE_DATE AS LAST_PURCHASE_DATE, SUM(REVENUE) AS LAST_PURCHASE_AMT
             FROM u GROUP BY 1, 2
-            QUALIFY ROW_NUMBER() OVER (PARTITION BY CUSTOMER_NAME ORDER BY SALE_DATE DESC) = 1
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY ACCOUNT ORDER BY SALE_DATE DESC) = 1
         )
-        SELECT y.CUSTOMER_NAME, y.YTD_PURCHASES, d.LAST_PURCHASE_DATE, d.LAST_PURCHASE_AMT
-        FROM ytd y JOIN last_day d USING (CUSTOMER_NAME)
+        SELECT y.ACCOUNT AS CUSTOMER_NAME, y.YTD_PURCHASES, d.LAST_PURCHASE_DATE, d.LAST_PURCHASE_AMT
+        FROM ytd y JOIN last_day d USING (ACCOUNT)
         ORDER BY y.YTD_PURCHASES DESC
     """).to_pandas()
 
