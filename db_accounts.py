@@ -119,19 +119,27 @@ def load_accounts():
         acct_expr = "CUSTOMER_NAME"
     return session.sql(f"""
         WITH u AS (
-            SELECT {acct_expr} AS ACCOUNT, SALE_DATE, REVENUE
+            SELECT {acct_expr} AS ACCOUNT, ORDER_REF, SALE_DATE, REVENUE
             FROM GOLD_V3_DB.SALES.REVOPS_SALES_UNIFIED
             WHERE SALE_DATE >= DATE_TRUNC('year', CURRENT_DATE)
               AND CUSTOMER_NAME IN ({names})
         ),
         ytd AS (SELECT ACCOUNT, SUM(REVENUE) AS YTD_PURCHASES FROM u GROUP BY 1),
-        last_day AS (
-            SELECT ACCOUNT, SALE_DATE AS LAST_PURCHASE_DATE, SUM(REVENUE) AS LAST_PURCHASE_AMT
+        -- Roll lines up to the order grain. The unified view is per line/shipment
+        -- and SALE_DATE is the ship/completion date, so a single order can span
+        -- several days; summing per ORDER_REF gives the true order total, and the
+        -- order's first sale date is the closest proxy for its order date.
+        ord AS (
+            SELECT ACCOUNT, ORDER_REF, SUM(REVENUE) AS ORDER_AMT, MIN(SALE_DATE) AS ORDER_DATE
             FROM u GROUP BY 1, 2
-            QUALIFY ROW_NUMBER() OVER (PARTITION BY ACCOUNT ORDER BY SALE_DATE DESC) = 1
+        ),
+        last_ord AS (
+            SELECT ACCOUNT, ORDER_DATE AS LAST_PURCHASE_DATE, ORDER_AMT AS LAST_PURCHASE_AMT
+            FROM ord
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY ACCOUNT ORDER BY ORDER_DATE DESC, ORDER_AMT DESC) = 1
         )
-        SELECT y.ACCOUNT AS CUSTOMER_NAME, y.YTD_PURCHASES, d.LAST_PURCHASE_DATE, d.LAST_PURCHASE_AMT
-        FROM ytd y JOIN last_day d USING (ACCOUNT)
+        SELECT y.ACCOUNT AS CUSTOMER_NAME, y.YTD_PURCHASES, l.LAST_PURCHASE_DATE, l.LAST_PURCHASE_AMT
+        FROM ytd y JOIN last_ord l USING (ACCOUNT)
         ORDER BY y.YTD_PURCHASES DESC
     """).to_pandas()
 
