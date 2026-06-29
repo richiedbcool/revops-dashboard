@@ -104,13 +104,30 @@ def _get_session():
         "warehouse": st.secrets["sf_warehouse"],
         "database": st.secrets.get("sf_database", "GOLD_V3_DB"),
         "schema": st.secrets.get("sf_schema", "PUBLIC"),
+        # Heartbeat keeps the token fresh while the app is awake. On Community
+        # Cloud the app sleeps and the heartbeat freezes, so the cached session
+        # can still go stale — q() handles that by rebuilding on token expiry.
+        "client_session_keep_alive": True,
     }).create()
 
 session = _get_session()
 
+# Snowflake auth-token-expired error codes. The cached @st.cache_resource
+# session outlives the token (esp. across Community Cloud sleep/wake), so when
+# we see one of these we drop the dead session, rebuild, and retry once.
+_EXPIRED_TOKEN_CODES = ("390114", "390108", "08001")
+
 @st.cache_data(ttl=600, show_spinner=False)
 def q(sql):
-    return session.sql(sql).to_pandas()
+    global session
+    try:
+        return session.sql(sql).to_pandas()
+    except Exception as e:
+        if any(code in str(e) for code in _EXPIRED_TOKEN_CODES):
+            _get_session.clear()       # evict the dead shared session
+            session = _get_session()   # rebuild with a fresh token
+            return session.sql(sql).to_pandas()
+        raise
 
 # ── Data: MTD revenue + orders per rep, from the dbt scorecard model ─────────
 # GOLD_V3_DB.SCORECARD.FCT_SALES_REP_REVENUE_DAILY (REVENUE_DATE = shipment
