@@ -1506,8 +1506,8 @@ def build_table_html(rows):
 # so it can't go blank when the daily snapshot lags), shipment-based revenue, and
 # quota tiers. Styled with the same sc-table design as the Daily scorecard.
 @st.cache_data(ttl=600)
-def load_sales_reps():
-    return q("""
+def load_sales_reps(m_start, m_end):
+    return q(f"""
 WITH reps AS (
   SELECT * FROM VALUES
     ('Corey Helper',    'Corey Helper',    'Director, National Accounts','National Accounts', NULL),
@@ -1518,7 +1518,7 @@ WITH reps AS (
     ('William Stevens', 'William Stevens', 'Inside Sales Rep',           'Inside Sales',        45000)
   AS r(rep, so_name, role, pod, monthly_target)
 ),
-bounds AS (SELECT DATE_TRUNC('month', CURRENT_DATE())::DATE AS m_start, CURRENT_DATE() AS m_end),
+bounds AS (SELECT '{m_start}'::DATE AS m_start, '{m_end}'::DATE AS m_end),
 -- v2: calls/emails repointed to the verified per-rep daily facts
 -- GOLD_V3_DB.SCORECARD.FCT_SALES_REP_CALLS_DAILY / FCT_SALES_REP_EMAILS_DAILY. REP_NAME
 -- matches the roster's display name (`rep`). Weekday (Mon-Fri) totals + distinct active
@@ -5369,10 +5369,35 @@ with tab_mbr:
 
 # ── SALES REPS TAB ────────────────────────────────────────────────────────────
 with tab_sales:
+    if "rep_month_offset" not in st.session_state:
+        st.session_state.rep_month_offset = 0
+
+    # Month navigation — 0 = current month (MTD), negative = full prior months
+    rnav1, rnav2, rnav3 = st.columns([1, 1, 7])
+    with rnav1:
+        if st.button("◀ Prev Month", key="rep_prev_month"):
+            st.session_state.rep_month_offset -= 1
+            st.rerun()
+    with rnav2:
+        if st.session_state.rep_month_offset < 0:
+            if st.button("Current Month", key="rep_cur_month"):
+                st.session_state.rep_month_offset = 0
+                st.rerun()
+
+    # Resolve the selected month's bounds
+    _rep_base = date.today().replace(day=1)
+    _rep_mi = _rep_base.year * 12 + (_rep_base.month - 1) + st.session_state.rep_month_offset
+    _rep_ms = date(_rep_mi // 12, _rep_mi % 12 + 1, 1)
+    _rep_next = (_rep_ms.replace(day=28) + timedelta(days=4)).replace(day=1)
+    _rep_is_mtd = st.session_state.rep_month_offset == 0
+    _rep_me = date.today() if _rep_is_mtd else (_rep_next - timedelta(days=1))
+    _rep_period = "Month-to-date" if _rep_is_mtd else "Full month"
+    _rep_hist = '' if _rep_is_mtd else ' &nbsp;·&nbsp; <span style="color:#e8c43a;font-size:11px;">HISTORICAL VIEW</span>'
+
     st.markdown(f"""
     <div class="sc-header">
         <span class="sc-title">Sales Rep Scorecard</span>
-        <span class="sc-subtitle">Month-to-date &nbsp;·&nbsp; {date.today().strftime('%B %Y')}</span>
+        <span class="sc-subtitle">{_rep_period} &nbsp;·&nbsp; {_rep_ms.strftime('%B %Y')}{_rep_hist}</span>
     </div>
     <div class="legend-row">
         <span class="leg"><span class="leg-dot" style="background:{T['g_bg']};border:1px solid {T['g_fg']};"></span>At/above target · Act/Day ≥ 60</span>
@@ -5382,7 +5407,7 @@ with tab_sales:
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown(build_sales_reps_html(load_sales_reps()), unsafe_allow_html=True)
+    st.markdown(build_sales_reps_html(load_sales_reps(_rep_ms, _rep_me)), unsafe_allow_html=True)
 
     st.markdown(f"""
     <div style="margin-top:20px; padding:10px 14px; border:1px solid #2d2d2d; border-radius:6px;
