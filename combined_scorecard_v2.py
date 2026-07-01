@@ -1512,7 +1512,6 @@ WITH reps AS (
   SELECT * FROM VALUES
     ('Corey Helper',    'Corey Helper',    'Director, National Accounts','National Accounts', NULL),
     ('Kamala Watkins',  'Kamala Watkins',  'Key Account Manager',        'National Accounts', NULL),
-    ('Miguel Gonzalez', 'Miguel Gonzales', 'Regional Sales Manager',     'Distributor Channel', NULL),
     ('Santo Perry',     'Santo Perry',     'Regional Sales Manager',     'Distributor Channel', NULL),
     ('Nelson Rosario',  'Nelson Rosario',  'Regional Sales Manager',     'Distributor Channel', NULL),
     ('Melinda Kingston','Melinda Kingston','Inside Sales Rep',           'Inside Sales',        45000),
