@@ -1577,16 +1577,18 @@ revenue AS (
    AND rd.REVENUE_DATE BETWEEN (SELECT m_start FROM bounds) AND (SELECT m_end FROM bounds)
   GROUP BY r.rep
 ),
--- v2: New Auths (first-ever completed shipment to a customer, this month) and Pending
--- (open-order revenue) intentionally stay on RAW Supabase ERP — the GOLD rep revenue
--- fact carries only ORDER_COUNT + TOTAL_REVENUE_AMT, not first-auth or pipeline-pending
--- amounts. v2 TODO: repoint if/when GOLD exposes these per-rep MTD measures.
+-- v2: New Auths + Pending repointed RAW -> GOLD (2026-07-01, verified 1:1).
+--   New Auths -> FACT_ORDERS B2B leg (shipment-completion grain): first-ever
+--     completed shipment per (salesperson, customer_id). Reproduces the app's
+--     old ship_to_name-keyed count for every scorecard rep.
+--   Pending   -> FACT_SALES_ORDERS open-order headers; same status set (db_cool-only).
+--   TODAY-CELL: both lag the current day until the next dbt run; UNION a live
+--     RAW_V2_DB.SUPABASE_ERP slice for [today] if penny-accurate current-day is needed.
 first_ship AS (
-  SELECT so.SALESPERSON AS so_name, LOWER(TRIM(so.SHIP_TO_NAME)) AS cust,
-         MIN(CONVERT_TIMEZONE('UTC','America/Denver', TRY_TO_TIMESTAMP_NTZ(s.COMPLETED_AT))::DATE) AS first_dt
-  FROM RAW_V2_DB.SUPABASE_ERP.SALES_ORDER_SHIPMENTS s
-  JOIN RAW_V2_DB.SUPABASE_ERP.SALES_ORDERS so ON so.ID=s.SALES_ORDER_ID
-  WHERE s.STATUS='COMPLETED' GROUP BY 1,2
+  SELECT salesperson AS so_name, customer_id AS cust, MIN(ship_date) AS first_dt
+  FROM GOLD_V3_DB.SALES.FACT_ORDERS
+  WHERE channel='B2B'
+  GROUP BY 1,2
 ),
 new_auths AS (
   SELECT r.rep, COUNT(*) AS n
@@ -1594,10 +1596,10 @@ new_auths AS (
   WHERE fs.first_dt BETWEEN b.m_start AND b.m_end GROUP BY r.rep
 ),
 pending AS (
-  SELECT r.rep, ROUND(SUM(TRY_CAST(so.TOTAL_AMOUNT AS NUMBER(18,2))),2) AS pending_rev
-  FROM reps r JOIN RAW_V2_DB.SUPABASE_ERP.SALES_ORDERS so ON so.SALESPERSON=r.so_name CROSS JOIN bounds b
-  WHERE so.STATUS IN ('PENDING_APPROVAL','APPROVED','AWAITING_PAYMENT')
-    AND so.ORDER_DATE BETWEEN b.m_start AND b.m_end GROUP BY r.rep
+  SELECT r.rep, ROUND(SUM(f.ORDER_TOTAL_AMT),2) AS pending_rev
+  FROM reps r JOIN GOLD_V3_DB.SALES.FACT_SALES_ORDERS f ON f.SALESPERSON=r.so_name CROSS JOIN bounds b
+  WHERE f.STATUS IN ('PENDING_APPROVAL','APPROVED','AWAITING_PAYMENT')
+    AND f.ORDER_DATE BETWEEN b.m_start AND b.m_end GROUP BY r.rep
 ),
 tiers AS (
   SELECT r.rep, r.monthly_target AS target_t, ROUND(0.70*r.monthly_target,0) AS base_t,
@@ -2006,15 +2008,17 @@ def _build_cumulative_b2b():
     DAMAGE_SHORT_CREDIT concessions zeroing out line_amount."""
     today_d = date.today()
     month_start = today_d.replace(day=1)
+    # v2 (2026-07-01): repointed to unified GOLD FACT_ORDERS (B2B leg). Its
+    # net_revenue_amt IS sum(shipment_line.qty * order_line.unit_price) on COMPLETED
+    # shipments dated on completed_at — same basis, FULL PRECISION. The old RAW formula
+    # cast unit_price::numeric (NUMBER(38,0)), truncating cents and under-reporting
+    # ~$714/mo (June: RAW 1,787,647 vs GOLD 1,788,361.08). GOLD is correct. NOTE:
+    # FACT_ORDERS lags the current day until the next dbt run (fine for MTD pacing).
     df = q(f"""
-        SELECT COALESCE(SUM(ssl.quantity::numeric * sol.unit_price::numeric), 0) AS mtd
-        FROM RAW_V2_DB.SUPABASE_ERP.SALES_ORDER_SHIPMENT_LINES ssl
-        JOIN RAW_V2_DB.SUPABASE_ERP.SALES_ORDER_SHIPMENTS sh
-              ON sh.id = ssl.shipment_id
-        JOIN RAW_V2_DB.SUPABASE_ERP.SALES_ORDER_LINES sol
-              ON sol.id = ssl.sales_order_line_id
-        WHERE sh.status = 'COMPLETED'
-          AND TRY_TO_DATE(LEFT(sh.completed_at,10)) BETWEEN '{month_start}' AND '{today_d}'
+        SELECT COALESCE(SUM(net_revenue_amt), 0) AS mtd
+        FROM GOLD_V3_DB.SALES.FACT_ORDERS
+        WHERE channel = 'B2B'
+          AND order_date BETWEEN '{month_start}' AND '{today_d}'
     """)
     mtd_actual = safe_float(df.iloc[0]['MTD'], 0) if not df.empty else 0.0
     next_month = (month_start.replace(day=28) + timedelta(days=4)).replace(day=1)
