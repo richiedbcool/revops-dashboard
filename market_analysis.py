@@ -1124,21 +1124,46 @@ premium brand is a displacement target.</p>""")
     else:
         st.caption("Unassigned territory — orders here are tagged Sales Admin or legacy reps.")
 
-    # ── Territory radar — at-risk + prospects (with State) ───────────────────
-    band("Territory Radar", "31–90d no order × last rep touch (Aircall + Outlook) · scoped to territory · "
-                            "excludes accounts already in your book")
+    # ── Territory radar — every ERP customer in territory, with status ───────
+    band("Territory Radar", "every B2B customer shipping into your states · status = recency · "
+                            "touch = Aircall + Outlook · excludes accounts already in your book")
     if R['kind'] == 'rsm':
-        _rad = q(f"""SELECT r.customer_name "Account", d.billing_state "State", r.segment "Segment",
-                            r.days_since_last_order "No Order (d)", r.last_order_value "Last Order $",
+        _rad = q(f"""WITH m(code, full) AS (SELECT * FROM VALUES
+                        {",".join(f"('{c}','{_ST[c].upper()}')" for c in _codes)}),
+                     c AS (
+                       SELECT s.customer_key, MAX(s.customer_name) nm, MAX(m.code) st,
+                              MAX(s.class_name) seg, MAX(s.sale_date) last_sale,
+                              DATEDIFF('day', MAX(s.sale_date), CURRENT_DATE()) days_no,
+                              ROUND(SUM(IFF(s.sale_date >= DATEADD('day',-365,CURRENT_DATE()),
+                                            s.revenue, 0))) rev12m
+                       FROM GOLD_V3_DB.SALES.REVOPS_SALES_UNIFIED s
+                       JOIN m ON UPPER(TRIM(s.ship_state)) IN (m.code, m.full)
+                       WHERE s.channel = 'B2B'
+                       GROUP BY s.customer_key),
+                     lastv AS (
+                       SELECT s.customer_key, ROUND(SUM(s.revenue), 2) last_day_rev
+                       FROM GOLD_V3_DB.SALES.REVOPS_SALES_UNIFIED s
+                       JOIN c ON c.customer_key = s.customer_key AND s.sale_date = c.last_sale
+                       WHERE s.channel = 'B2B' GROUP BY s.customer_key)
+                     SELECT c.nm "Account", c.st "State", c.seg "Segment",
+                            CASE WHEN c.days_no <= 30 THEN 'Active'
+                                 WHEN c.days_no <= 90 THEN 'Lapsed 31-90'
+                                 ELSE 'Dormant 90+' END "Status",
+                            c.days_no "No Order (d)", lv.last_day_rev "Last Order $",
+                            c.rev12m "Rev 12m",
                             r.days_since_call "Last Call (d)", r.days_since_email "Last Email (d)",
                             r.days_since_last_touch _touch
-                     FROM GOLD_V3_DB.SALES.REVOPS_AT_RISK_RADAR r
-                     JOIN GOLD_V3_DB.SALES.DIM_CUSTOMER d ON d.customer_key = r.customer_key
-                     WHERE UPPER(TRIM(d.billing_state)) IN ('{_code_sql}')
-                     ORDER BY r.last_order_value DESC LIMIT 25""")
+                     FROM c
+                     LEFT JOIN lastv lv ON lv.customer_key = c.customer_key
+                     LEFT JOIN GOLD_V3_DB.SALES.REVOPS_AT_RISK_RADAR r ON r.customer_key = c.customer_key
+                     ORDER BY CASE WHEN c.days_no BETWEEN 31 AND 90 THEN 0
+                                   WHEN c.days_no > 90 THEN 1 ELSE 2 END,
+                              c.rev12m DESC LIMIT 200""")
     else:
         _rad = q("""SELECT r.customer_name "Account", d.billing_state "State", r.segment "Segment",
+                           'Lapsed 31-90' "Status",
                            r.days_since_last_order "No Order (d)", r.last_order_value "Last Order $",
+                           r.lifetime_revenue "Rev 12m",
                            r.days_since_call "Last Call (d)", r.days_since_email "Last Email (d)",
                            r.days_since_last_touch _touch
                     FROM GOLD_V3_DB.SALES.REVOPS_AT_RISK_RADAR r
@@ -1152,11 +1177,17 @@ premium brand is a displacement target.</p>""")
             lambda v: _inv.get(str(v).strip().upper(), str(v).strip().upper()) if pd.notna(v) else '')
         _rad.insert(0, '!', _rad['_TOUCH'].apply(
             lambda v: '⚠' if (pd.isna(v) or v > 14) else ''))
-        show_table(_rad.drop(columns=['_TOUCH']), money_cols=['Last Order $'], scroll_h=420)
-        help_box("""<p><b>What this is:</b> every ERP customer shipping into your territory that ordered
-before but has gone <b>31–90 days without a reorder</b> — ranked by how much their last order was worth.
-<b>⚠ = nobody has touched them in 14+ days</b> (no call, no email). These are your call-down list:
-the money is already proven, it just stopped.</p>""")
+        _n_lap = int((_rad['Status'] == 'Lapsed 31-90').sum())
+        _n_dor = int((_rad['Status'] == 'Dormant 90+').sum())
+        _n_act = int((_rad['Status'] == 'Active').sum())
+        st.caption(f"{len(_rad)} customers in territory (not in your book): "
+                   f"{_n_lap} lapsed 31-90d · {_n_dor} dormant 90+d · {_n_act} active under another rep's tag")
+        show_table(_rad.drop(columns=['_TOUCH']), money_cols=['Last Order $', 'Rev 12m'], scroll_h=460)
+        help_box("""<p><b>What this is:</b> <b>every</b> ERP customer that ships into your territory and
+isn't in your tagged book — sorted hottest first: <b>Lapsed 31-90d</b> (proven money that just stopped —
+call these first), then <b>Dormant 90+</b> (win-back list, ranked by 12-month revenue), then
+<b>Active</b> (ordering, but tagged to someone else — check ownership).
+<b>⚠ = nobody has touched them in 14+ days</b> (no call, no email — blank means no touch on record).</p>""")
     else:
         st.caption("No at-risk accounts in this territory right now — radar is clear.")
 
