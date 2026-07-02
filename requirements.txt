@@ -1,7 +1,9 @@
-# RevOps Signal dashboard — Streamlit Community Cloud
-streamlit>=1.36
-pandas>=2.0
-snowflake-snowpark-python>=1.18
-snowflake-connector-python>=3.10
-cryptography>=42.0
-openpyxl>=3.1          # sales_commission_mtd.py — Excel export with live formulas
+# RevOps dashboard apps — Streamlit Community Cloud
+# Pinned to the 2026-07-02 known-good deploy for reproducible builds.
+# Bump deliberately + redeploy to test; don't let Cloud resolve latest silently.
+streamlit==1.58.0
+pandas==3.0.3
+snowflake-snowpark-python==1.52.0
+snowflake-connector-python==4.7.0
+cryptography==49.0.0
+openpyxl==3.1.5          # sales_commission_mtd.py — Excel export with live formulas
