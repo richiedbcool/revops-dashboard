@@ -1009,8 +1009,8 @@ if _section == "My Territory":
                       GROUP BY brand_name ORDER BY 2 DESC LIMIT 10""")
         if len(_comp):
             _comp['Brand'] = _comp.apply(
-                lambda r_: f"▶ {r_['Brand']}" if r_['_mit'] == 1 else r_['Brand'], axis=1)
-            show_table(_comp.drop(columns=['_mit']), money_cols=['$ (52wk)', '$/Unit'], bold_top=True)
+                lambda r_: f"▶ {r_['Brand']}" if r_['_MIT'] == 1 else r_['Brand'], axis=1)
+            show_table(_comp.drop(columns=['_MIT']), money_cols=['$ (52wk)', '$/Unit'], bold_top=True)
             help_box("""<p><b>How to use this:</b> the <b>$/Unit</b> column is your price story — MIT45 is
 premium-priced, so sell <b>margin dollars per facing</b>, not invoice price. <b>Momentum</b> shows who's
 gaining in YOUR states in the last 4 weeks — a rising cheap brand is a shelf-space threat; a fading
@@ -1150,9 +1150,9 @@ premium brand is a displacement target.</p>""")
         _inv = {v.upper(): k for k, v in _ST.items()}
         _rad['State'] = _rad['State'].apply(
             lambda v: _inv.get(str(v).strip().upper(), str(v).strip().upper()) if pd.notna(v) else '')
-        _rad.insert(0, '!', _rad['_touch'].apply(
+        _rad.insert(0, '!', _rad['_TOUCH'].apply(
             lambda v: '⚠' if (pd.isna(v) or v > 14) else ''))
-        show_table(_rad.drop(columns=['_touch']), money_cols=['Last Order $'], scroll_h=420)
+        show_table(_rad.drop(columns=['_TOUCH']), money_cols=['Last Order $'], scroll_h=420)
         help_box("""<p><b>What this is:</b> every ERP customer shipping into your territory that ordered
 before but has gone <b>31–90 days without a reorder</b> — ranked by how much their last order was worth.
 <b>⚠ = nobody has touched them in 14+ days</b> (no call, no email). These are your call-down list:
