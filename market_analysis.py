@@ -287,7 +287,7 @@ def _choropleth(vals, tips, color_fn, legend_html, height=560):
 # Rendering only the chosen section keeps peak memory well within budget.
 _section = st.radio(
     "View", ["Overview", "Shelf & Share", "Maps", "Explorer", "Key Accounts",
-             "Channels & SPINS", "Promo & Price"],
+             "Channels & SPINS", "Promo & Price", "My Territory"],
     horizontal=True, label_visibility="collapsed")
 
 # ── OVERVIEW ─────────────────────────────────────────────────────────────
@@ -866,3 +866,300 @@ in both the Circle K (Nielsen) and conventional (SPINS) panels.</p>
 promote</b> (low % incremental). That's a deliberate position — but it means we win on brand, not price.</p>
 <p><b>Use it for:</b> any pricing or promo conversation — see the gap to competitors, and use base-vs-incremental
 to gauge whether a promo would actually lift volume before committing spend.</p>""")
+
+# ── MY TERRITORY (per-rep slicer) ─────────────────────────────────────────────
+# Added 2026-07-02. Pick a rep up top; every block re-scopes to their territory.
+# Coverage per Richie 2026-07-02; playbook context hardcoded from accounts/DB-E2E-*.docx
+# (update _REPS when territories change). Panels stay separate per the doc rule:
+# Nielsen = state competitive · SPINS = region/account · internal = FACT_ORDERS
+# (salesperson-tagged, reliable May 2026+) + REVOPS_AT_RISK_RADAR. Never sum panels.
+if _section == "My Territory":
+    _ST = {'ID': 'Idaho', 'AZ': 'Arizona', 'UT': 'Utah', 'MT': 'Montana', 'WY': 'Wyoming',
+           'NM': 'New Mexico', 'CO': 'Colorado', 'ND': 'North Dakota', 'TX': 'Texas',
+           'NE': 'Nebraska', 'MI': 'Michigan', 'KY': 'Kentucky', 'GA': 'Georgia',
+           'SC': 'South Carolina', 'WV': 'West Virginia', 'NC': 'North Carolina',
+           'VA': 'Virginia', 'PA': 'Pennsylvania', 'MD': 'Maryland', 'DE': 'Delaware',
+           'NJ': 'New Jersey', 'NY': 'New York', 'NH': 'New Hampshire', 'RI': 'Rhode Island',
+           'MA': 'Massachusetts', 'ME': 'Maine', 'OH': 'Ohio', 'FL': 'Florida'}
+    _REPS = {
+        'Melinda Kingston': dict(kind='rsm', so='Melinda Kingston',
+            states=['ID', 'AZ', 'UT', 'MT', 'WY', 'NM', 'CO', 'ND'], regions=['WEST', 'PLAINS'],
+            play="Quota $9.11M · win-adj coverage 0.4x → source 6 net-new · vital: Durity (KAP), "
+                 "Phresh Picks, Snowball, AZ Complete Candy & Tobacco · watch: WY ban bill, Denver carve-out"),
+        'Kamala Watkins': dict(kind='rsm', so='Kamala Watkins',
+            states=['TX', 'NE'], regions=['SOUTH CENTRAL'],
+            play="Quota $15.22M · coverage 0.6x → 7 net-new · vital: EAZY, Toro, Sigma, Big Boss "
+                 "(Harwin corridor), GSC, Zone · watch: TX SB1868 · Spanish sell sheet needed"),
+        'Quinn McHenry': dict(kind='rsm', so='Quinn McHenry',
+            states=['MI', 'KY', 'GA'], regions=['GREAT LAKES', 'SOUTHEAST'],
+            play="Quota $12.33M · coverage 0.5x → 7 net-new · vital: Trepco, ASR Group, "
+                 "S. Abraham & Sons, Peach State · watch: MI Senate ban (org-level risk), GA bill"),
+        'Nelson Rosario': dict(kind='rsm', so='Nelson Rosario',
+            states=['SC', 'WV', 'NC', 'VA'], regions=['SOUTHEAST', 'MID-SOUTH'],
+            play="Quota $11.65M · coverage 0.7x → 4 net-new · vital: Southco, J.T. Davenport, "
+                 "Big South, Atlantic Dominion, Team Sledd, Pilot (routed) · watch: SC + WV bills"),
+        'Santo Perry': dict(kind='rsm', so='Santo Perry',
+            states=['PA', 'MD', 'DE', 'NJ', 'NY', 'NH', 'RI', 'MA', 'ME'], regions=['NORTHEAST'],
+            play="Quota $15.75M · coverage 1.9x → 0 net-new · vital: NCD/HLA/J. Polep (KAP), "
+                 "Demand Vape (verify first), Rainforest · watch: MD bills · RI first-mover blitz"),
+        'Corey Helper (National Accounts)': dict(kind='nat', so='Corey Helper', states=[], regions=[],
+            play="Quota $23.4M · coverage 2.4x · Big-3 pursuit: McLane, PFG/Core-Mark, H.T. Hackney · "
+                 "anchors: Caseys Innovation Summit, Hackney Expo, NACS"),
+        'House / Unassigned (OH, FL)': dict(kind='rsm', so=None,
+            states=['OH', 'FL'], regions=['GREAT LAKES', 'SOUTHEAST'],
+            play="No quota assigned — former T6 territory; Topicz, Miami Distro, Epic Wholesale unowned"),
+    }
+    _rc1, _rc2 = st.columns([1, 2])
+    with _rc1:
+        _rep = st.selectbox("Rep / territory", list(_REPS.keys()), key="rt_rep")
+    R = _REPS[_rep]
+    _codes = R['states']
+    _full = [_ST[s] for s in _codes]
+    _full_sql = "','".join(_full)
+    # DIM_CUSTOMER.BILLING_STATE mixes codes and full names ('FL' and 'FLORIDA') —
+    # match the radar on both forms.
+    _code_sql = "','".join(_codes + [_ST[s].upper() for s in _codes])
+
+    if R['kind'] == 'rsm':
+        _opp = q(f"""SELECT state, cat_dollars, mit_dollars, mit_share_pct, mit_pct_acv,
+                            untapped_dollars, share_gap, distribution_gap
+                     FROM GOLD_V3_DB.SALES.REVOPS_NIELSEN_STATE_OPPORTUNITY
+                     WHERE state IN ('{_full_sql}')""")
+        _covered = set(_opp['STATE']) if len(_opp) else set()
+        with _rc2:
+            _chips = " · ".join(
+                (s if _ST[s] in _covered else f"{s} (no syndicated data)") for s in _codes)
+            st.markdown(f'<div style="padding-top:34px;font-size:12px;color:#94a3b8;">'
+                        f'Coverage: {_chips}</div>', unsafe_allow_html=True)
+
+        # KPI tiles — Nielsen territory rollup + share momentum + internal sell-in
+        _mom = q(f"""SELECT period_type, ROUND(100*SUM(mit_dollars)/NULLIF(SUM(set_dollars),0),1) sh
+                     FROM GOLD_V3_DB.SALES.REVOPS_NIELSEN_STATE_SHARE
+                     WHERE state IN ('{_full_sql}') AND is_latest_rolling
+                       AND period_type IN ('Latest 4 Weeks','Latest 52 Weeks')
+                     GROUP BY 1""")
+        _sh4 = _mom[_mom['PERIOD_TYPE'] == 'Latest 4 Weeks']['SH'].max() if len(_mom) else None
+        _sh52 = _mom[_mom['PERIOD_TYPE'] == 'Latest 52 Weeks']['SH'].max() if len(_mom) else None
+        _sell = q(f"""WITH m(code, full) AS (SELECT * FROM VALUES
+                        {",".join(f"('{c}','{_ST[c].upper()}')" for c in _codes)})
+                      SELECT ROUND(SUM(s.revenue), 0) rev
+                      FROM GOLD_V3_DB.SALES.REVOPS_SALES_UNIFIED s
+                      JOIN m ON UPPER(TRIM(s.ship_state)) IN (m.code, m.full)
+                      WHERE s.channel = 'B2B'
+                        AND s.sale_date >= DATEADD('day', -90, CURRENT_DATE())""")
+        _srev = _sell['REV'][0] if len(_sell) and _sell['REV'][0] is not None else 0
+        if len(_opp):
+            _cat = _opp['CAT_DOLLARS'].sum(); _mit = _opp['MIT_DOLLARS'].sum()
+            _shr = 100 * _mit / _cat if _cat else 0
+            _unt = _opp['UNTAPPED_DOLLARS'].sum()
+            _acv = (_opp['MIT_PCT_ACV'] * _opp['CAT_DOLLARS']).sum() / _cat if _cat else 0
+            _d4 = (f"{_sh4 - _sh52:+.1f} pt vs 52wk" if _sh4 is not None and _sh52 is not None else "—")
+            st.markdown('<div class="rv-tiles">'
+                + tile("Category $ (52wk)", f"${_cat/1e6:,.1f}M", "Nielsen · territory states w/ data", "rv-real")
+                + tile("MIT45 $ / share", f"${_mit/1e3:,.0f}K", f"{_shr:.1f}% of territory category", "rv-real")
+                + tile("Share momentum", f"{_sh4 if _sh4 is not None else '—'}%",
+                       f"L4W share · {_d4}", "rv-real")
+                + tile("MIT45 %ACV", f"{_acv:.0f}%", "distribution reach · $-weighted", "rv-real")
+                + tile("Untapped $", f"${_unt/1e6:,.1f}M", "category $ not yet MIT45", "rv-real")
+                + tile("Sell-in 90d", f"${_srev:,.0f}", "internal B2B shipped to territory", "rv-real")
+                + '</div>', unsafe_allow_html=True)
+        else:
+            st.info("No Nielsen state data for this territory — internal sell-in only.")
+
+        # Territory map — MIT45 share, non-territory dimmed
+        band("Territory Map", "MIT45 $ share by state · Nielsen 52wk · dark = outside territory or no data")
+        if len(_opp):
+            _vals = {r_['STATE']: r_['MIT_SHARE_PCT'] for _, r_ in _opp.iterrows()}
+            _tips = {r_['STATE']: f"{r_['STATE']} — {r_['MIT_SHARE_PCT']:.1f}% share, "
+                                  f"${r_['UNTAPPED_DOLLARS']:,.0f} untapped" for _, r_ in _opp.iterrows()}
+            _mx = max(v for v in _vals.values() if v is not None) or 1
+            def _rt_color(v):
+                i = min(int((v / _mx) * (len(_GREENS) - 1)), len(_GREENS) - 1)
+                return _GREENS[len(_GREENS) - 1 - i]
+            _leg = _swatch(_GREENS[-1], "low share") + _swatch(_GREENS[0], "high share") + \
+                   _swatch('#222a38', "no data / outside territory")
+            _choropleth(_vals, _tips, _rt_color, _leg, height=430)
+
+        # State battle table
+        band("State Battle", "one row per territory state · sorted by untapped $")
+        if len(_opp):
+            _bt = _opp.rename(columns={
+                'STATE': 'State', 'CAT_DOLLARS': 'Category $', 'MIT_DOLLARS': 'MIT45 $',
+                'MIT_SHARE_PCT': 'Share %', 'MIT_PCT_ACV': 'ACV %',
+                'UNTAPPED_DOLLARS': 'Untapped $', 'DISTRIBUTION_GAP': 'Dist Gap'})
+            _bt = _bt.sort_values('Untapped $', ascending=False)[
+                ['State', 'Category $', 'MIT45 $', 'Share %', 'ACV %', 'Untapped $', 'Dist Gap']]
+            show_table(_bt, money_cols=['Category $', 'MIT45 $', 'Untapped $'], bold_top=True)
+            _miss = [s for s in _codes if _ST[s] not in _covered]
+            if _miss:
+                st.caption(f"No syndicated data: {', '.join(_miss)} — work these from internal sell-in "
+                           "and the radar below. (UT panel went stale Jan 2026.)")
+
+        # Competitor landscape
+        band("Competitor Landscape", "brands in your states · Nielsen 52wk · momentum = last-4wk pace vs 52wk avg")
+        _comp = q(f"""SELECT brand_name "Brand", SUM(dollars) "$ (52wk)",
+                             ROUND(100*SUM(dollars)/NULLIF(SUM(SUM(dollars)) OVER (),0),1) "Share %",
+                             ROUND(SUM(dollars)/NULLIF(SUM(units),0),2) "$/Unit",
+                             CASE WHEN SUM(dollars_last4wk) > 1.15*SUM(dollars)/13 THEN 'rising'
+                                  WHEN SUM(dollars_last4wk) < 0.85*SUM(dollars)/13 THEN 'fading'
+                                  ELSE 'steady' END "4wk Momentum",
+                             MAX(IFF(is_mit45, 1, 0)) _mit
+                      FROM GOLD_V3_DB.SALES.REVOPS_NIELSEN_STATE_BRAND
+                      WHERE state IN ('{_full_sql}')
+                      GROUP BY brand_name ORDER BY 2 DESC LIMIT 10""")
+        if len(_comp):
+            _comp['Brand'] = _comp.apply(
+                lambda r_: f"▶ {r_['Brand']}" if r_['_mit'] == 1 else r_['Brand'], axis=1)
+            show_table(_comp.drop(columns=['_mit']), money_cols=['$ (52wk)', '$/Unit'], bold_top=True)
+            help_box("""<p><b>How to use this:</b> the <b>$/Unit</b> column is your price story — MIT45 is
+premium-priced, so sell <b>margin dollars per facing</b>, not invoice price. <b>Momentum</b> shows who's
+gaining in YOUR states in the last 4 weeks — a rising cheap brand is a shelf-space threat; a fading
+premium brand is a displacement target.</p>""")
+        else:
+            st.caption("No Nielsen brand rows for these states.")
+
+        # Whitespace plays — auto-generated from the battle table
+        band("Whitespace & Plays", "auto-ranked from the state battle")
+        if len(_opp):
+            _plays = []
+            _dist = _opp[_opp['MIT_PCT_ACV'] < 15].sort_values('UNTAPPED_DOLLARS', ascending=False)
+            if len(_dist):
+                r0 = _dist.iloc[0]
+                _plays.append(f"**Distribution play — {r0['STATE']}:** ${r0['CAT_DOLLARS']:,.0f} category "
+                              f"but MIT45 is only on {r0['MIT_PCT_ACV']:.0f}% of shelves "
+                              f"(${r0['UNTAPPED_DOLLARS']:,.0f} untapped). Get on shelf first.")
+            _vel = _opp[(_opp['MIT_PCT_ACV'] >= 15) & (_opp['MIT_SHARE_PCT'] < _shr)]
+            _vel = _vel.sort_values('UNTAPPED_DOLLARS', ascending=False)
+            if len(_vel):
+                r1 = _vel.iloc[0]
+                _plays.append(f"**Velocity play — {r1['STATE']}:** decent shelf presence "
+                              f"({r1['MIT_PCT_ACV']:.0f}% ACV) but share lags at {r1['MIT_SHARE_PCT']:.1f}% — "
+                              f"placement/promo problem, not a distribution one.")
+            _best = _opp.sort_values('MIT_SHARE_PCT', ascending=False).iloc[0]
+            _plays.append(f"**Reference story:** {_best['STATE']} leads your territory at "
+                          f"{_best['MIT_SHARE_PCT']:.1f}% share — use its account mix as the proof "
+                          f"deck for the states above.")
+            for p_ in _plays:
+                st.markdown(p_)
+
+        # SPINS regional context (separate panel — never summed with Nielsen)
+        band("SPINS Regional Context", " · ".join(R['regions']) + " · MULO+Conv · separate panel from Nielsen")
+        _reg_sql = "','".join(R['regions'])
+        _spr = q(f"""SELECT ROUND(100*SUM(IFF(is_mit45, dollars, 0))/NULLIF(SUM(dollars),0),1) sh,
+                            ROUND(SUM(IFF(is_7oh, dollars, 0))) oh
+                     FROM GOLD_V3_DB.SALES.REVOPS_SPINS_COMPETITIVE
+                     WHERE geo_type='REGION' AND UPPER(region_name) IN ('{_reg_sql}')""")
+        if len(_spr) and _spr['SH'][0] is not None:
+            st.markdown('<div class="rv-tiles">'
+                + tile("MIT45 regional share", f"{_spr['SH'][0]}%", "SPINS conventional", "rv-real")
+                + tile("7-OH threat", f"${(_spr['OH'][0] or 0)/1e6:,.1f}M",
+                       "synthetic segment $ in your regions", "rv-real")
+                + '</div>', unsafe_allow_html=True)
+
+    else:
+        # ── Corey / national accounts variant ────────────────────────────────
+        with _rc2:
+            st.markdown('<div style="padding-top:34px;font-size:12px;color:#94a3b8;">'
+                        'Coverage: 8 SPINS tracked retailers + Big-3 wholesale (internal)</div>',
+                        unsafe_allow_html=True)
+        _acc = q("""SELECT account_name, SUM(IFF(is_mit45, dollars, 0)) mit_d,
+                           ROUND(100*SUM(IFF(is_mit45, dollars, 0))/NULLIF(SUM(dollars),0),1) mit_sh,
+                           MAX(IFF(is_mit45, dollar_rank, NULL)) rk,
+                           ROUND(100*SUM(IFF(is_7oh, dollars, 0))/NULLIF(SUM(dollars),0),1) oh_sh
+                    FROM GOLD_V3_DB.SALES.REVOPS_SPINS_ACCOUNT
+                    GROUP BY account_name ORDER BY mit_d DESC""")
+        if len(_acc):
+            _auth = int((_acc['MIT_D'] > 0).sum()); _tot = len(_acc)
+            st.markdown('<div class="rv-tiles">'
+                + tile("Tracked retailers", f"{_tot}", "SPINS account-level panel", "rv-real")
+                + tile("MIT45 $ (52wk)", f"${_acc['MIT_D'].sum()/1e6:,.1f}M", "across tracked accounts", "rv-real")
+                + tile("Authorized", f"{_auth}/{_tot}", "accounts where MIT45 scans", "rv-real")
+                + '</div>', unsafe_allow_html=True)
+            band("Account Battle", "SPINS tracked retailers · 52wk · rank = MIT45 $ rank in that account's set")
+            _ab = _acc.rename(columns={'ACCOUNT_NAME': 'Account', 'MIT_D': 'MIT45 $',
+                                       'MIT_SH': 'MIT45 Share %', 'RK': 'Rank', 'OH_SH': '7-OH Share %'})
+            show_table(_ab, money_cols=['MIT45 $'], bold_top=True)
+            st.caption("Zero rows = unauthorized (whitespace). The Murphy velocity story is the opener; "
+                       "rising 7-OH share is the compliance-angle ammunition.")
+        band("Big-3 + Online Wholesale (internal sell-in — invisible to SPINS)",
+             "distributors don't scan at retail; internal shipments are the only lens")
+        _big3 = q("""SELECT customer_name "Account",
+                            ROUND(SUM(IFF(sale_date >= DATEADD('day',-90,CURRENT_DATE()), revenue, 0))) "Rev 90d",
+                            MAX(sale_date)::string "Last Sale",
+                            DATEDIFF('day', MAX(sale_date), CURRENT_DATE()) "Days Since"
+                     FROM GOLD_V3_DB.SALES.REVOPS_SALES_UNIFIED
+                     WHERE channel='B2B' AND (customer_name ILIKE '%MCLANE%' OR customer_name ILIKE '%CORE%MARK%'
+                        OR customer_name ILIKE '%HACKNEY%' OR customer_name ILIKE '%VAPERANGER%'
+                        OR customer_name ILIKE '%MASTER DISTRO%' OR customer_name ILIKE '%MY SMOKE%'
+                        OR customer_name ILIKE '%1 STOP%' OR customer_name ILIKE '%MURPHY%')
+                     GROUP BY 1 ORDER BY 2 DESC LIMIT 12""")
+        if len(_big3):
+            show_table(_big3, money_cols=['Rev 90d'], bold_top=True)
+        else:
+            st.caption("No Big-3 / online-wholesale names matched in sell-in — check customer naming.")
+
+    # ── My book — salesperson-tagged sales (both variants) ───────────────────
+    band("My Book — Tagged Sales", "orders carrying this rep as salesperson · May 2026 onward")
+    _book_names = set()
+    if R['so']:
+        _bk = q(f"""SELECT COALESCE(d.customer_name, f.customer_id) "Customer",
+                           MAX(f.order_date)::string "Last Order",
+                           ROUND(MAX_BY(f.order_total_amt, f.order_date), 2) "Last Order $",
+                           DATEDIFF('day', MAX(f.order_date), CURRENT_DATE()) "No Order (d)",
+                           ROUND(SUM(IFF(f.order_date >= DATEADD('day',-90,CURRENT_DATE()),
+                                         f.net_revenue_amt, 0))) "Rev 90d"
+                    FROM GOLD_V3_DB.SALES.FACT_ORDERS f
+                    LEFT JOIN GOLD_V3_DB.SALES.DIM_CUSTOMER d ON d.customer_id = f.customer_id
+                    WHERE f.salesperson = '{R['so']}' AND f.channel = 'B2B'
+                      AND f.order_date >= '2026-05-01'
+                    GROUP BY 1 ORDER BY "Rev 90d" DESC LIMIT 20""")
+        if len(_bk):
+            _book_names = set(_bk['Customer'].str.upper())
+            show_table(_bk, money_cols=['Last Order $', 'Rev 90d'])
+            st.caption(f"{len(_bk)} tagged customer(s). Attribution is only reliable from May 2026 — "
+                       "older orders may carry Sales Admin or a legacy name.")
+        else:
+            st.warning(f"No orders carry '{R['so']}' as salesperson since May 1. "
+                       "If that's wrong, order entry isn't tagging this rep — flag it.")
+    else:
+        st.caption("Unassigned territory — orders here are tagged Sales Admin or legacy reps.")
+
+    # ── Territory radar — at-risk + prospects (with State) ───────────────────
+    band("Territory Radar", "31–90d no order × last rep touch (Aircall + Outlook) · scoped to territory · "
+                            "excludes accounts already in your book")
+    if R['kind'] == 'rsm':
+        _rad = q(f"""SELECT r.customer_name "Account", d.billing_state "State", r.segment "Segment",
+                            r.days_since_last_order "No Order (d)", r.last_order_value "Last Order $",
+                            r.days_since_call "Last Call (d)", r.days_since_email "Last Email (d)",
+                            r.days_since_last_touch _touch
+                     FROM GOLD_V3_DB.SALES.REVOPS_AT_RISK_RADAR r
+                     JOIN GOLD_V3_DB.SALES.DIM_CUSTOMER d ON d.customer_key = r.customer_key
+                     WHERE UPPER(TRIM(d.billing_state)) IN ('{_code_sql}')
+                     ORDER BY r.last_order_value DESC LIMIT 25""")
+    else:
+        _rad = q("""SELECT r.customer_name "Account", d.billing_state "State", r.segment "Segment",
+                           r.days_since_last_order "No Order (d)", r.last_order_value "Last Order $",
+                           r.days_since_call "Last Call (d)", r.days_since_email "Last Email (d)",
+                           r.days_since_last_touch _touch
+                    FROM GOLD_V3_DB.SALES.REVOPS_AT_RISK_RADAR r
+                    JOIN GOLD_V3_DB.SALES.DIM_CUSTOMER d ON d.customer_key = r.customer_key
+                    ORDER BY r.last_order_value DESC LIMIT 25""")
+    if len(_rad):
+        _rad = _rad[~_rad['Account'].str.upper().isin(_book_names)]
+    if len(_rad):
+        _inv = {v.upper(): k for k, v in _ST.items()}
+        _rad['State'] = _rad['State'].apply(
+            lambda v: _inv.get(str(v).strip().upper(), str(v).strip().upper()) if pd.notna(v) else '')
+        _rad.insert(0, '!', _rad['_touch'].apply(
+            lambda v: '⚠' if (pd.isna(v) or v > 14) else ''))
+        show_table(_rad.drop(columns=['_touch']), money_cols=['Last Order $'], scroll_h=420)
+        help_box("""<p><b>What this is:</b> every ERP customer shipping into your territory that ordered
+before but has gone <b>31–90 days without a reorder</b> — ranked by how much their last order was worth.
+<b>⚠ = nobody has touched them in 14+ days</b> (no call, no email). These are your call-down list:
+the money is already proven, it just stopped.</p>""")
+    else:
+        st.caption("No at-risk accounts in this territory right now — radar is clear.")
+
+    st.markdown(f'<div style="margin-top:16px;padding:10px 14px;border:1px solid #26324a;'
+                f'border-radius:8px;background:#0e1626;font-size:12px;color:#8fa3c0;">'
+                f'📓 Playbook: {R["play"]}</div>', unsafe_allow_html=True)
