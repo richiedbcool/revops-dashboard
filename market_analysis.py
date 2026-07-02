@@ -966,6 +966,41 @@ if _section == "My Territory":
         else:
             st.info("No Nielsen state data for this territory — internal sell-in only.")
 
+        # Territory trend — WoW lines (gaining or losing at a glance)
+        band("Territory Trend — Week over Week",
+             "left: our sell-in $ shipped into your states (internal, exact) · "
+             "right: MIT45 share of your SPINS region(s) (sell-through proxy — SPINS has no state grain)")
+        _tw1, _tw2 = st.columns(2)
+        with _tw1:
+            _wkin = q(f"""WITH m(code, full) AS (SELECT * FROM VALUES
+                            {",".join(f"('{c}','{_ST[c].upper()}')" for c in _codes)})
+                          SELECT s.sale_week "Week", ROUND(SUM(s.revenue)) "Sell-in $"
+                          FROM GOLD_V3_DB.SALES.REVOPS_SALES_UNIFIED s
+                          JOIN m ON UPPER(TRIM(s.ship_state)) IN (m.code, m.full)
+                          WHERE s.channel = 'B2B'
+                            AND s.sale_week >= DATEADD('week', -26, CURRENT_DATE())
+                            AND s.sale_week < DATE_TRUNC('week', CURRENT_DATE())
+                          GROUP BY 1 ORDER BY 1""")
+            if len(_wkin):
+                st.line_chart(_wkin.set_index('Week'), height=220)
+                st.caption("Weekly B2B sell-in $ into territory · current partial week excluded")
+            else:
+                st.caption("No sell-in history for these states.")
+        with _tw2:
+            _regq = "','".join(R['regions'])
+            _wkout = q(f"""SELECT week_ending_date "Week",
+                                  ROUND(100*SUM(IFF(is_mit45, dollars, 0))/NULLIF(SUM(dollars),0), 2)
+                                      "MIT45 share %"
+                           FROM GOLD_V3_DB.SALES.REVOPS_SPINS_WEEKLY
+                           WHERE geo_type = 'REGION' AND UPPER(region_name) IN ('{_regq}')
+                             AND week_ending_date >= DATEADD('week', -26, CURRENT_DATE())
+                           GROUP BY 1 ORDER BY 1""")
+            if len(_wkout):
+                st.line_chart(_wkout.set_index('Week'), height=220)
+                st.caption(f"MIT45 weekly $ share · SPINS {' + '.join(R['regions'])} · sell-through")
+            else:
+                st.caption("No SPINS weekly rows for these regions.")
+
         # Territory map — MIT45 share, non-territory dimmed
         band("Territory Map", "MIT45 $ share by state · Nielsen 52wk · dark = outside territory or no data")
         if len(_opp):
@@ -1075,6 +1110,39 @@ premium brand is a displacement target.</p>""")
                 + tile("MIT45 $ (52wk)", f"${_acc['MIT_D'].sum()/1e6:,.1f}M", "across tracked accounts", "rv-real")
                 + tile("Authorized", f"{_auth}/{_tot}", "accounts where MIT45 scans", "rv-real")
                 + '</div>', unsafe_allow_html=True)
+            band("National Trend — Week over Week",
+                 "left: Big-3 + online wholesale sell-in $ (internal) · "
+                 "right: MIT45 share across SPINS tracked retailers (sell-through)")
+            _tw1, _tw2 = st.columns(2)
+            with _tw1:
+                _wkin = q("""SELECT s.sale_week "Week", ROUND(SUM(s.revenue)) "Sell-in $"
+                             FROM GOLD_V3_DB.SALES.REVOPS_SALES_UNIFIED s
+                             WHERE s.channel='B2B'
+                               AND (s.customer_name ILIKE '%MCLANE%' OR s.customer_name ILIKE '%CORE%MARK%'
+                                    OR s.customer_name ILIKE '%HACKNEY%' OR s.customer_name ILIKE '%VAPERANGER%'
+                                    OR s.customer_name ILIKE '%MASTER DISTRO%' OR s.customer_name ILIKE '%MY SMOKE%'
+                                    OR s.customer_name ILIKE '%1 STOP%' OR s.customer_name ILIKE '%MURPHY%')
+                               AND s.sale_week >= DATEADD('week', -26, CURRENT_DATE())
+                               AND s.sale_week < DATE_TRUNC('week', CURRENT_DATE())
+                             GROUP BY 1 ORDER BY 1""")
+                if len(_wkin):
+                    st.line_chart(_wkin.set_index('Week'), height=220)
+                    st.caption("Weekly sell-in $ to Big-3 + online wholesale · partial week excluded")
+                else:
+                    st.caption("No matching wholesale sell-in.")
+            with _tw2:
+                _wkout = q("""SELECT week_ending_date "Week",
+                                     ROUND(100*SUM(IFF(is_mit45, dollars, 0))/NULLIF(SUM(dollars),0), 2)
+                                         "MIT45 share %"
+                              FROM GOLD_V3_DB.SALES.REVOPS_SPINS_WEEKLY
+                              WHERE geo_type = 'ACCOUNT'
+                                AND week_ending_date >= DATEADD('week', -26, CURRENT_DATE())
+                              GROUP BY 1 ORDER BY 1""")
+                if len(_wkout):
+                    st.line_chart(_wkout.set_index('Week'), height=220)
+                    st.caption("MIT45 weekly $ share across the 8 tracked retailers")
+                else:
+                    st.caption("No SPINS weekly account rows.")
             band("Account Battle", "SPINS tracked retailers · 52wk · rank = MIT45 $ rank in that account's set")
             _ab = _acc.rename(columns={'ACCOUNT_NAME': 'Account', 'MIT_D': 'MIT45 $',
                                        'MIT_SH': 'MIT45 Share %', 'RK': 'Rank', 'OH_SH': '7-OH Share %'})
