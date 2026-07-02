@@ -12,7 +12,6 @@ within one panel — never add Nielsen + SPINS together.
 import html as _html
 import streamlit as st
 import pandas as pd
-import streamlit.components.v1 as _components
 from snowflake.snowpark.context import get_active_session
 from datetime import date, timedelta
 
@@ -279,7 +278,7 @@ def _choropleth(vals, tips, color_fn, legend_html, height=560):
           + ''.join(_pp) + '</svg>'
           '<div style="display:flex;gap:14px;flex-wrap:wrap;justify-content:center;font-size:11px;'
           'color:#94a3b8;margin-top:6px;">' + legend_html + '</div>')
-    _components.html(_h, height=height)
+    st.iframe(_h, height=height)
 
 
 mt_over, mt_shelf, mt_maps, mt_expl, mt_acct, mt_chan, mt_promo = st.tabs(
