@@ -281,12 +281,17 @@ def _choropleth(vals, tips, color_fn, legend_html, height=560):
     st.iframe(_h, height=height)
 
 
-mt_over, mt_shelf, mt_maps, mt_expl, mt_acct, mt_chan, mt_promo = st.tabs(
-    ["Overview", "Shelf & Share", "Maps", "Explorer", "Key Accounts",
-     "Channels & SPINS", "Promo & Price"])
+# Single-select nav instead of st.tabs: st.tabs executes EVERY tab body on each
+# rerun (~28 queries + 3 choropleth maps at once), which spikes past the 1GB
+# Community Cloud ceiling and OOM-kills the container in a restart loop.
+# Rendering only the chosen section keeps peak memory well within budget.
+_section = st.radio(
+    "View", ["Overview", "Shelf & Share", "Maps", "Explorer", "Key Accounts",
+             "Channels & SPINS", "Promo & Price"],
+    horizontal=True, label_visibility="collapsed")
 
 # ── OVERVIEW ─────────────────────────────────────────────────────────────
-with mt_over:
+if _section == "Overview":
     # SPINS conventional share for MIT45 family + 7-OH segment size
     spx = q("""SELECT brand_family, ROUND(dollar_share_pct,1) sh, ROUND(dollars) dol
                FROM GOLD_V3_DB.SALES.REVOPS_SPINS_COMPETITIVE
@@ -369,7 +374,7 @@ watch; 7TABZ alone is already bigger in SPINS conventional than MIT45's whole fa
 </div>""", unsafe_allow_html=True)
 
 # ── SHELF & SHARE (Nielsen) ──────────────────────────────────────────────
-with mt_shelf:
+if _section == "Shelf & Share":
     cshareL, cshareR = st.columns([3, 2])
     with cshareL:
         band("Competitive Shelf Share & FSI (Nielsen)",
@@ -470,7 +475,7 @@ recent change (negative = shrinking) · <b>Δ YoY</b> = vs a year ago.</p>
 find out why we're losing shelf and win the space back before a competitor takes it.</p>""")
 
 # ── MAPS (Nielsen) ───────────────────────────────────────────────────────
-with mt_maps:
+if _section == "Maps":
     band("Shelf Position by State (Nielsen)",
          "REAL · Convenience · Latest 52 Wks · pick a brand — map recolors; hover a state for full detail")
     _map_brands = q("""SELECT DISTINCT brand_name FROM GOLD_V3_DB.SALES.REVOPS_NIELSEN_STATE_BRAND
@@ -599,7 +604,7 @@ brightest whitespace states for new distribution.</p>""")
                "volume up for grabs). Biggest: TX (~$31M), GA (~$31M), FL (~$28M), then OR/KY/PA. Hover for detail.")
 
 # ── EXPLORER (Nielsen) ───────────────────────────────────────────────────
-with mt_expl:
+if _section == "Explorer":
     band("Competitive Explorer (Nielsen)",
          "REAL · Convenience · Latest 52 Wks · pick a brand to dig into its products & markets")
     _brands = q("""SELECT DISTINCT brand_name FROM GOLD_V3_DB.SALES.REVOPS_NIELSEN_LIVE
@@ -668,7 +673,7 @@ names who sells more per store in each state.</p>
 per store — that's your talking point.</p>""")
 
 # ── KEY ACCOUNTS (Nielsen Circle K + SPINS chains) ───────────────────────
-with mt_acct:
+if _section == "Key Accounts":
     st.markdown("##### 🏪 Circle K (Nielsen — 16 regions · promo · price)")
     _ckp = q("""SELECT brand_name, dollars, dollar_share_pct, price_per_unit, price_per_eq_unit, pct_incremental
                 FROM GOLD_V3_DB.SALES.REVOPS_NIELSEN_CK_PRICE ORDER BY dollars DESC""")
@@ -782,7 +787,7 @@ reporting), which is itself a prospecting signal.</p>
 target). Walk in knowing where we stand in <b>their</b> stores.</p>""")
 
 # ── CHANNELS & SPINS ─────────────────────────────────────────────────────
-with mt_chan:
+if _section == "Channels & SPINS":
     band("SPINS Conventional — brand share (Total US MULO + Convenience · 52 wks)",
          "REAL · the natural/specialty + conventional panel Nielsen's c-store cut misses")
     _spc = q("""SELECT brand_family "Brand", dollar_rank "#", dollars "$ (52wk)",
@@ -832,7 +837,7 @@ MIT45's entire family in this panel. High "% incremental" = that growth is deal-
 c-store numbers.</p>""")
 
 # ── PROMO & PRICE ────────────────────────────────────────────────────────
-with mt_promo:
+if _section == "Promo & Price":
     band("Circle K — Price & Promo Ladder (Nielsen)", "Circle K Total · 52wk · $/EQ = pack-size-normalized")
     _ladder = q("""SELECT brand_name "Brand", dollars "$ (52wk)", ROUND(dollar_share_pct,1) "Share %",
                           ROUND(price_per_unit,2) "$/Unit", ROUND(price_per_eq_unit,2) "$/EQ Unit",
